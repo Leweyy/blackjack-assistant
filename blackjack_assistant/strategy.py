@@ -16,6 +16,8 @@ class Action(str, Enum):
     DOUBLE = "DOUBLE"
     SPLIT = "SPLIT"
     SURRENDER = "SURRENDER"
+    INSURANCE = "TAKE INSURANCE"
+    NO_INSURANCE = "NO INSURANCE"
 
 
 @dataclass(frozen=True)
@@ -75,12 +77,16 @@ def recommend(
     can_double: bool | None = None,
     can_split: bool | None = None,
     can_surrender: bool | None = None,
+    true_count: float | None = None,
 ) -> Recommendation:
     """Recommend the basic-strategy action.
 
     The ``can_*`` flags say whether the table currently offers that action.
     ``None`` means "infer it": double/surrender only on a two-card hand,
     split only on a two-card pair.
+
+    With a Hi-Lo ``true_count``, the Illustrious 18 and Fab 4 index plays
+    override basic strategy.
     """
     if len(player_cards) < 2:
         raise ValueError("Need at least two player cards")
@@ -105,18 +111,39 @@ def recommend(
     if total > 21:
         return rec(Action.STAND, "Bust")
 
+    tc = true_count
+    hard = not soft
+
     # 1. Surrender
     if can_surrender:
-        if _should_surrender(total, soft, is_pair, ranks, up, rules):
+        index = _surrender_index(total, up, rules) if (tc is not None and hard and not is_pair) else None
+        if index is not None:
+            if tc >= index:
+                return rec(Action.SURRENDER, f"Surrender {total} vs {_up(up)}  ·  count play (TC ≥ {index:+d})")
+        elif _should_surrender(total, soft, is_pair, ranks, up, rules):
             return rec(Action.SURRENDER, f"Surrender {total} vs {_up(up)}")
 
     # 2. Split
-    if can_split and _should_split(ranks[0], up, rules):
-        return rec(Action.SPLIT, f"Split {ranks[0]}s vs {_up(up)}")
+    if can_split:
+        index = SPLIT_INDEX.get((card_value(ranks[0]), up)) if tc is not None else None
+        if index is not None and tc >= index:
+            return rec(Action.SPLIT, f"Split {ranks[0]}s vs {_up(up)}  ·  count play (TC ≥ {index:+d})")
+        if _should_split(ranks[0], up, rules):
+            return rec(Action.SPLIT, f"Split {ranks[0]}s vs {_up(up)}")
 
     # 3. Soft / hard totals
     code = _soft_action(total, up, rules) if soft else _hard_action(total, up, rules)
     label = f"{'Soft' if soft else 'Hard'} {total} vs {_up(up)}"
+
+    if tc is not None and hard:
+        index = STAND_INDEX.get((total, up))
+        if index is not None:
+            code = "S" if tc >= index else "H"
+            label += f"  ·  count play (stand at TC ≥ {index:+d})"
+        index = DOUBLE_INDEX.get((total, up))
+        if index is not None and code == "H" and tc >= index:
+            code = "D"
+            label += f"  ·  count play (TC ≥ {index:+d})"
 
     if code == "D":
         return rec(Action.DOUBLE, label) if can_double else rec(Action.HIT, label + " (can't double)")
@@ -129,6 +156,35 @@ def recommend(
 
 def _up(up: int) -> str:
     return "A" if up == 11 else str(up)
+
+
+# Illustrious 18 index numbers (Hi-Lo, multi-deck). Keys are (hard total, dealer upcard).
+STAND_INDEX = {
+    (16, 10): 0, (15, 10): 4, (16, 9): 5,
+    (13, 2): -1, (13, 3): -2,
+    (12, 2): 3, (12, 3): 2, (12, 4): 0, (12, 5): -2, (12, 6): -1,
+}
+DOUBLE_INDEX = {(11, 11): 1, (10, 10): 4, (10, 11): 4, (9, 2): 1, (9, 7): 3}
+SPLIT_INDEX = {(10, 5): 5, (10, 6): 4}  # split tens
+INSURANCE_INDEX = 3
+
+
+def should_take_insurance(true_count: float | None) -> bool:
+    """Insurance is a losing bet off the top; take it only at TC ≥ +3."""
+    return true_count is not None and true_count >= INSURANCE_INDEX
+
+
+def _surrender_index(total: int, up: int, rules: Rules) -> int | None:
+    """Fab 4 surrender indices; None means use basic strategy."""
+    if total == 14 and up == 10:
+        return 3
+    if total == 15 and up == 10:
+        return 0
+    if total == 15 and up == 9:
+        return 2
+    if total == 15 and up == 11:
+        return -1 if rules.dealer_hits_soft_17 else 1
+    return None
 
 
 def _should_surrender(total, soft, is_pair, ranks, up, rules) -> bool:

@@ -1,6 +1,6 @@
 [project]
 name = "blackjack-assistant"
-version = "0.4.0"
+version = "0.5.0"
 description = "Watches your screen while you play blackjack and recommends your next move"
 readme = "README.md"
 requires-python = ">=3.10"

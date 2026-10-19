@@ -26,9 +26,17 @@ export interface WindowSource {
   icon: string | null; // data: URL
 }
 
+export type Provider = "anthropic" | "local";
+
 export interface Settings {
+  provider: Provider;
   api_key: string;
   model: string;
+  local_url: string;
+  local_model: string;
+  local_api_key: string;
+  local_max_side: number;
+  save_frames: boolean;
   interval: number;
   fast_reads: boolean;
   monitor: number;
@@ -49,6 +57,7 @@ export interface Settings {
 export interface SettingsInfo {
   settings: Settings;
   config_path: string;
+  frames_dir: string;
   env_api_key: boolean;
 }
 
@@ -95,7 +104,7 @@ export type BackendEvent =
   | { event: "seat"; data: Seat | null }
   | { event: "backend-exit"; data: { code: number | null } };
 
-export type RendererMethod = "get_settings" | "save_settings" | "test_screenshot" | "reset_count";
+export type RendererMethod = "get_settings" | "save_settings" | "test_screenshot" | "reset_count" | "local_models";
 
 /** The API the preload script exposes to the UI as `window.api`. */
 export interface Api {
@@ -110,6 +119,8 @@ export interface Api {
   platform: string;
   openImage(): Promise<string | null>;
   openExternal(url: string): Promise<void>;
+  /** Open the folder where "Save screenshots for testing" puts frames. */
+  openFramesFolder(): Promise<void>;
   closeOverlay(): void;
   resizeOverlay(height: number): void;
   pickerDone(rect: { x: number; y: number; width: number; height: number } | null): void;

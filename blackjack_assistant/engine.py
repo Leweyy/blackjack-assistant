@@ -2,26 +2,46 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from pathlib import Path
 from typing import Callable
 
 import anthropic
 
 from .advisor import Advice, BetSettings, advise
-from .capture import CaptureError, ChangeDetector, mark_seat, to_jpeg
+from .capture import MAX_SIDE, CaptureError, ChangeDetector, mark_seat, to_jpeg
 from .counting import HiLoCounter, RoundTracker
 from .strategy import Rules
-from .vision import TableReader, VisionError
+from .vision import VisionError
 
 Emit = Callable[["Advice | str"], None]
+
+
+def save_frame(save_dir: Path, jpeg: bytes, table, took: float, seat_marked: bool = False) -> None:
+    """Keep the screenshot as sent and what the model read, for building a test set.
+
+    To label a frame, copy NAME.json to NAME.label.json and correct the cards.
+    """
+    try:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        name = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        (save_dir / f"{name}.jpg").write_bytes(jpeg)
+        (save_dir / f"{name}.json").write_text(
+            json.dumps({**table.model_dump(), "seconds": round(took, 2), "seat_marked": seat_marked},
+                       ensure_ascii=False, indent=2),
+            encoding="utf-8")
+    except OSError:
+        pass  # saving is a debugging aid; never let it break play
 
 
 def watch_loop(grabber, reader, rules, interval, emit: Emit, stop: threading.Event,
                tracker: RoundTracker | None = None, bets: BetSettings = BetSettings(),
                seat: "list[float] | Callable[[], list[float] | None] | None" = None,
-               max_in_flight: int = 2):
+               max_in_flight: int = 2, save_dir: Path | None = None):
     """Capture every `interval` seconds and read changed frames, up to `max_in_flight` at once.
 
     A read takes a few seconds, so waiting for each one before taking the next
@@ -40,8 +60,11 @@ def watch_loop(grabber, reader, rules, interval, emit: Emit, stop: threading.Eve
         try:
             if seat_box:
                 img = mark_seat(img, seat_box)
-            table = reader.read(to_jpeg(img), seat_marked=bool(seat_box))
+            jpeg = to_jpeg(img, getattr(reader, "max_side", MAX_SIDE))
+            table = reader.read(jpeg, seat_marked=bool(seat_box))
             took = time.monotonic() - captured_at
+            if save_dir:
+                save_frame(save_dir, jpeg, table, took, bool(seat_box))
             with lock:
                 if frame_seq < state["applied"] or stop.is_set():
                     return  # a newer screenshot has already been shown
@@ -93,11 +116,12 @@ def watch_loop(grabber, reader, rules, interval, emit: Emit, stop: threading.Eve
 class Session:
     """One run of the watch loop on a background thread."""
 
-    def __init__(self, *, api_key: str | None, model: str, rules: Rules, bets: BetSettings, interval: float,
+    def __init__(self, *, reader, rules: Rules, bets: BetSettings, interval: float,
                  make_grabber: Callable[[], object], counting: bool = True, decks: int = 8, emit: Emit,
-                 seat: list[float] | None = None, max_in_flight: int = 2,
+                 seat: list[float] | None = None, max_in_flight: int = 2, save_dir: Path | None = None,
                  on_exit: Callable[[], None] | None = None):
-        self.reader = TableReader(model=model, client=anthropic.Anthropic(api_key=api_key or None))
+        self.reader = reader
+        self.save_dir = save_dir
         self.tracker = RoundTracker(HiLoCounter(decks=decks)) if counting else None
         self._args = (make_grabber, rules, interval, emit, bets)
         self.seat = seat  # can be changed while running (e.g. "Mark seat" in the overlay)
@@ -113,7 +137,7 @@ class Session:
             try:
                 grabber = make_grabber()  # mss handles are per-thread, so create it here
                 watch_loop(grabber, self.reader, rules, interval, emit, self._stop, self.tracker, bets,
-                           seat=lambda: self.seat, max_in_flight=self.max_in_flight)
+                           seat=lambda: self.seat, max_in_flight=self.max_in_flight, save_dir=self.save_dir)
             except Exception as e:  # noqa: BLE001 - e.g. screen capture failing; report, don't die silently
                 emit(f"Error: {e}")
             finally:

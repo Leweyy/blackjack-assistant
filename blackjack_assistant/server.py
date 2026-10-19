@@ -24,7 +24,7 @@ from . import config
 from .advisor import Advice, advise
 from .counting import HiLoCounter, RoundTracker
 from .engine import Session
-from .vision import TableReader, VisionError
+from .vision import VisionError
 
 
 class RequestError(Exception):
@@ -80,7 +80,7 @@ class Server:
         if handler is None:
             self.send({"id": req_id, "error": f"Unknown method: {method}"})
             return
-        slow = method in ("test_screenshot", "capture_bounds")
+        slow = method in ("test_screenshot", "capture_bounds", "local_models")
 
         def run():
             try:
@@ -110,7 +110,16 @@ class Server:
     def rpc_get_settings(self) -> dict:
         s = config.load(self._config_path)
         return {"settings": asdict(s), "config_path": str(self._config_path or config.config_path()),
+                "frames_dir": str(config.frames_dir()),
                 "env_api_key": bool(config.Settings().effective_api_key())}
+
+    def rpc_local_models(self, url: str, api_key: str = "") -> list[str]:
+        """Models offered by a local server; doubles as a connection test."""
+        from .local_vision import list_models
+        try:
+            return list_models(url.strip(), api_key.strip())
+        except VisionError as e:
+            raise RequestError(str(e)) from e
 
     def rpc_save_settings(self, settings: dict) -> dict:
         s = config.from_dict(settings)
@@ -130,8 +139,8 @@ class Server:
         problems = config.validate(s)
         if problems:
             raise RequestError(" ".join(problems))
-        if not s.effective_api_key():
-            raise RequestError("Add your Anthropic API key in Settings → Connection first.")
+        if missing := s.missing_credentials():
+            raise RequestError(missing)
 
         def emit(item):
             if isinstance(item, Advice):
@@ -149,7 +158,8 @@ class Server:
                 self._session = None
                 self.event("stopped")
 
-        session = Session(api_key=s.effective_api_key(), model=s.model, rules=s.rules(), bets=s.bets(),
+        session = Session(reader=s.reader(), save_dir=config.frames_dir() if s.save_frames else None,
+                          rules=s.rules(), bets=s.bets(),
                           interval=s.interval, make_grabber=s.grabber,
                           counting=s.counting, decks=s.decks, emit=emit, seat=s.seat,
                           max_in_flight=2 if s.fast_reads else 1, on_exit=on_exit)
@@ -198,8 +208,8 @@ class Server:
         from .capture import mark_seat, to_jpeg
 
         s = config.load(self._config_path)
-        if not s.effective_api_key():
-            raise RequestError("Add your Anthropic API key first.")
+        if missing := s.missing_credentials():
+            raise RequestError(missing)
         try:
             with Image.open(path) as img:
                 img = img.convert("RGB")
@@ -208,8 +218,8 @@ class Server:
         if s.seat:
             img = mark_seat(img, s.seat)
         try:
-            reader = TableReader(model=s.model, client=anthropic.Anthropic(api_key=s.effective_api_key()))
-            state = reader.read(to_jpeg(img), seat_marked=bool(s.seat))
+            reader = s.reader()
+            state = reader.read(to_jpeg(img, getattr(reader, "max_side", 1568)), seat_marked=bool(s.seat))
         except anthropic.AuthenticationError as e:
             raise RequestError("The API key was rejected.") from e
         except (VisionError, anthropic.APIError) as e:
@@ -249,6 +259,8 @@ def self_test() -> int:
             api.is_minimized(handle)
             api.rect(handle)
     anthropic.Anthropic(api_key="self-test")
+    from .local_vision import LocalReader  # makes sure the openai package was bundled
+    LocalReader("http://localhost:11434/v1", "self-test")
     print("self-test ok", file=sys.stderr)
     return 0
 

@@ -1,11 +1,12 @@
 // Electron main process: windows, the region picker, and the bridge to the Python backend.
 
+import fs from "node:fs";
 import path from "node:path";
 import { app, BrowserWindow, desktopCapturer, Display, dialog, ipcMain, Rectangle, screen, shell } from "electron";
 import { Backend } from "./backend";
 import type { BackendEvent, PickMode, Region, RendererMethod, Seat, WindowSource } from "../shared/types";
 
-const RENDERER_METHODS: RendererMethod[] = ["get_settings", "save_settings", "test_screenshot", "reset_count"];
+const RENDERER_METHODS: RendererMethod[] = ["get_settings", "save_settings", "test_screenshot", "reset_count", "local_models"];
 const BG = "#0e1116";
 
 const backend = new Backend();
@@ -257,6 +258,12 @@ function registerIpc(): void {
     if (url.startsWith("https://console.anthropic.com/") || url.startsWith("https://platform.claude.com/")) {
       return shell.openExternal(url);
     }
+  });
+  ipcMain.handle("frames:open", async () => {
+    const info = await backend.request<{ frames_dir: string }>("get_settings");
+    fs.mkdirSync(info.frames_dir, { recursive: true });
+    const failed = await shell.openPath(info.frames_dir);
+    if (failed) throw new Error(failed);
   });
   ipcMain.on("overlay:close", () => {
     void backend.request("stop").catch(() => undefined);

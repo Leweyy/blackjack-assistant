@@ -12,6 +12,40 @@ import re
 from .strategy import hand_total, normalize_rank
 
 
+_SUIT_WORDS = {
+    "♠": "♠", "♣": "♣", "♥": "♥", "♦": "♦", "♤": "♠", "♧": "♣", "♡": "♥", "♢": "♦",
+    "s": "♠", "c": "♣", "h": "♥", "d": "♦",
+    "spade": "♠", "spades": "♠", "club": "♣", "clubs": "♣",
+    "heart": "♥", "hearts": "♥", "diamond": "♦", "diamonds": "♦",
+}
+_RANK_WORDS = {
+    "a": "A", "ace": "A", "1": "A", "k": "K", "king": "K", "q": "Q", "queen": "Q", "j": "J", "jack": "J",
+    "t": "10", "ten": "10", "10": "10", "two": "2", "three": "3", "four": "4", "five": "5",
+    "six": "6", "seven": "7", "eight": "8", "nine": "9", **{str(n): str(n) for n in range(2, 10)},
+}
+
+
+def normalize_card(card: str) -> str:
+    """Write a card as rank + suit symbol ("9♥"), or the rank alone if there's no suit.
+
+    Accepts the variations models produce: "9H", "9 of hearts", "Ten♣", "T♠", "10 ♦".
+    Anything unrecognisable is returned unchanged (and later reported as unreadable).
+    """
+    text = str(card).strip()
+    t = text.lower().replace(" of ", " ")
+    m = re.fullmatch(r"([a-z]+|\d+)\s*([♠♣♥♦♤♧♡♢]|[a-z]+)?", t)
+    if not m:
+        return text
+    rank_word, suit_word = m.group(1), m.group(2)
+    if suit_word is None and rank_word not in _RANK_WORDS and len(rank_word) == 2:
+        rank_word, suit_word = rank_word[0], rank_word[1]  # "kh", "th"
+    rank = _RANK_WORDS.get(rank_word)
+    suit = _SUIT_WORDS.get(suit_word, "") if suit_word else ""
+    if rank is None or (suit_word and not suit):
+        return text
+    return rank + suit
+
+
 def shown_totals(text: str) -> set[int]:
     """Values a displayed hand total allows: "14" -> {14}, "4/14" or "Soft 14" -> {4, 14}, "BJ" -> {21}."""
     t = (text or "").strip().lower()
@@ -83,7 +117,12 @@ def reconcile_hand(cards: list[str], shown: str = "", must_be_live: bool = False
 
 
 def reconcile_table(state):
-    """Apply reconcile_hand to the player's hands and the dealer's cards in a TableState."""
+    """Normalise card names, then apply reconcile_hand to the player's hands and the dealer's cards."""
+    state = state.model_copy(update={
+        "player_hands": [[normalize_card(c) for c in hand] for hand in state.player_hands],
+        "dealer_cards": [normalize_card(c) for c in state.dealer_cards],
+        "other_players_cards": [normalize_card(c) for c in state.other_players_cards],
+    })
     totals = list(state.player_hand_totals) + [""] * len(state.player_hands)
     trustworthy = True
     hands = []

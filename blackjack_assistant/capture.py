@@ -159,14 +159,14 @@ def mark_seat(img: Image.Image, seat: list[float] | tuple[float, ...]) -> Image.
     return out
 
 
-def to_jpeg(img: Image.Image) -> bytes:
+def to_jpeg(img: Image.Image, max_side: int = MAX_SIDE) -> bytes:
     """Scaled-down JPEG for the API.
 
     JPEG at this quality keeps card indices sharp while being ~10x smaller than PNG
     for a video frame, which matters: the upload is part of every read's latency.
     """
     img = img.convert("RGB")
-    img.thumbnail((MAX_SIDE, MAX_SIDE))
+    img.thumbnail((max_side, max_side))
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=88)
     return buf.getvalue()

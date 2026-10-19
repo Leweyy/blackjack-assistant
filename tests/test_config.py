@@ -65,3 +65,18 @@ def test_seat_box_cleaning():
     assert config.clean_seat([0.95, 0.9, 0.2, 0.3]) == [0.95, 0.9, 0.05, 0.1]  # clipped to the image
     assert config.clean_seat([0.5, 0.5, 0.001, 0.2]) is None
     assert config.clean_seat([1, 2, 3]) is None
+
+
+def test_provider_settings(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert config.from_dict({"provider": "nope"}).provider == "anthropic"
+    assert "API key" in config.Settings().missing_credentials()
+    local = config.Settings(provider="local", local_model="")
+    assert "Choose a local model" in local.missing_credentials()
+    local.local_model = "qwen2.5vl:7b"
+    assert local.missing_credentials() is None
+    from blackjack_assistant.local_vision import LocalReader
+    reader = local.reader()
+    assert isinstance(reader, LocalReader) and reader.max_side == 1024
+    assert any("http://" in p for p in config.validate(config.Settings(provider="local", local_url="localhost:11434")))
+    assert any("between 256 and 2048" in p for p in config.validate(config.Settings(local_max_side=100)))

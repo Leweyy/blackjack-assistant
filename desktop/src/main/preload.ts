@@ -14,6 +14,7 @@ const api: Api = {
   platform: process.platform,
   openImage: () => ipcRenderer.invoke("dialog:openImage"),
   openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),
+  openFramesFolder: () => ipcRenderer.invoke("frames:open"),
   closeOverlay: () => ipcRenderer.send("overlay:close"),
   resizeOverlay: (height) => ipcRenderer.send("overlay:resize", height),
   pickerDone: (rect) => ipcRenderer.send("picker:done", rect),

@@ -1,0 +1,28 @@
+# Rough Ollama setup for the local-model option (NVIDIA GPU).
+#   docker compose -f docker-compose.ollama.yml up -d
+#   docker compose -f docker-compose.ollama.yml exec ollama ollama pull qwen2.5vl:7b
+# Then in the app: Connection → Local model → Ollama → http://localhost:11434/v1
+# Needs GPU access in Docker (Docker Desktop + WSL2 on Windows, NVIDIA Container
+# Toolkit on Linux). For AMD use the ollama/ollama:rocm image with /dev/kfd and /dev/dri.
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama     # downloaded models survive restarts
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h    # keep the model loaded between reads
+      - OLLAMA_NUM_PARALLEL=2    # lets "Faster updates" overlap two reads
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  ollama:

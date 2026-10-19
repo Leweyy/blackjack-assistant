@@ -43,3 +43,14 @@ def test_reconcile_table():
                        shuffle_detected=False, insurance_offered=False, confident=True)
     fixed = reconcile_table(state)
     assert fixed.player_hands == [["K♠", "4♥"]] and fixed.dealer_cards == ["10♣"] and fixed.confident
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("9♥", "9♥"), ("9H", "9♥"), ("9h", "9♥"), ("9 of hearts", "9♥"), ("Nine of Hearts", "9♥"),
+    ("10 ♠", "10♠"), ("T♣", "10♣"), ("Ten", "10"), ("ten of diamonds", "10♦"), ("KH", "K♥"), ("kd", "K♦"),
+    ("Ace of Spades", "A♠"), ("A", "A"), ("q♡", "Q♥"), ("j", "J"), ("4", "4"), ("10", "10"),
+    ("??", "??"), ("joker", "joker"), ("9 of stars", "9 of stars"),
+])
+def test_normalize_card(raw, expected):
+    from blackjack_assistant.reconcile import normalize_card
+    assert normalize_card(raw) == expected

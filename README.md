@@ -22,7 +22,8 @@ There's no auto-update yet. To update, download the new version from Releases.
 ## Using it
 
 1. **Connection:** paste your Anthropic API key (create one at
-   [console.anthropic.com](https://console.anthropic.com/settings/keys)). Optionally use
+   [console.anthropic.com](https://console.anthropic.com/settings/keys)), or choose
+   **Local model** to use your own Ollama or vLLM server (see below). Optionally use
    **Test with a screenshot** to check it reads your game correctly.
 2. **Table rules:** match your table: whether the dealer hits soft 17, double after
    split, and surrender.
@@ -79,6 +80,56 @@ Electron app (React/TSX)  ── JSON over stdin/stdout ──  Python backend
    The AI only reads the cards; it doesn't choose the move. The engine uses basic
    strategy for your rules, adjusted by the true count when counting is on.
 4. **Show:** the overlay updates and plays a sound when it's your turn.
+
+## Local models (Ollama, vLLM, LM Studio)
+
+Instead of Claude, the cards can be read by a vision model running on your own machine
+or another PC on your network: free, offline, and as fast as your GPU allows. Counting,
+strategy and the overlay work the same either way.
+
+1. Run a server with a vision model, for example:
+   - **Ollama on Windows:** install from ollama.com, then `ollama pull qwen2.5vl:7b`.
+   - **Ollama in Docker:** `docker compose -f docker-compose.ollama.yml up -d`, then
+     `docker compose -f docker-compose.ollama.yml exec ollama ollama pull qwen2.5vl:7b`.
+     This needs GPU access in Docker: Docker Desktop with WSL2, or the NVIDIA Container
+     Toolkit on Linux.
+   - **vLLM** (Linux, or WSL2/Docker on Windows): `vllm serve Qwen/Qwen2.5-VL-7B-Instruct`.
+     vLLM's options change between versions, so check its docs for image limits and memory
+     settings.
+2. In the app, open **Connection → Local model**, pick the preset (Ollama
+   `http://localhost:11434/v1`, vLLM `http://localhost:8000/v1`, LM Studio
+   `http://localhost:1234/v1`) or type another address, then press **Test connection**
+   and choose the model.
+3. Use **Test with a screenshot** to check it reads your table, then press Start.
+
+Notes:
+
+- **Model size:** smaller models misread cards more often. A 7B model is the minimum
+  worth trying; a 32B model (quantised to fit in 24 GB) is a better balance. Marking your
+  seat matters more with small models.
+- **Image size** (Connection tab) defaults to 1024 px for local models. Lower is faster,
+  higher helps if cards are misread.
+- **Faster updates:** Ollama only overlaps two reads if started with
+  `OLLAMA_NUM_PARALLEL=2` (the compose file sets this). vLLM overlaps them by default.
+- **Format quirks:** the app copes with how small models often reply (thinking blocks,
+  code fences, "9H" or "9 of hearts" for 9♥). If the server doesn't support strict JSON
+  output, it falls back to plain JSON mode automatically.
+
+### Comparing models on your own table
+
+Turn on **Save screenshots for testing** (Connection tab) and play a few rounds. Every
+read is saved as `NAME.jpg` plus `NAME.json` (what was read). Use **Open folder** to find
+them. To label a frame, copy `NAME.json` to `NAME.label.json` and correct the cards. Then
+compare readers on the labelled frames:
+
+```bash
+python -m blackjack_assistant.evaluate "%APPDATA%\BlackjackAssistant\frames"
+python -m blackjack_assistant.evaluate FRAMES --model claude-sonnet-5-5
+python -m blackjack_assistant.evaluate FRAMES --local-url http://localhost:11434/v1 --local-model qwen2.5vl:7b
+```
+
+It reports how often your hand, the dealer's cards and the resulting advice were right,
+plus the time per read.
 
 ## Card counting (live-dealer games)
 
@@ -201,6 +252,9 @@ There's also a command-line version that prints advice in a terminal:
 | `blackjack_assistant/strategy.py` | Basic strategy + count index plays |
 | `blackjack_assistant/counting.py` | Hi-Lo count, bet ramp, round tracking |
 | `blackjack_assistant/vision.py` | Claude vision → structured table state |
+| `blackjack_assistant/local_vision.py` | Same, via a local OpenAI-compatible server |
+| `blackjack_assistant/reconcile.py` | Card-name cleanup and double-read fixes |
+| `blackjack_assistant/evaluate.py` | Compare readers on labelled screenshots |
 | `blackjack_assistant/server.py` | JSON-lines backend used by the desktop app |
 | `desktop/src/main/` | Electron main process and preload bridge |
 | `desktop/src/renderer/` | React UI: settings, overlay, area picker |

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Advice, CaptureMode, ChosenWindow, Region, ScreenshotResult, Seat, Settings, SettingsInfo } from "../../shared/types";
+import type { Advice, CaptureMode, ChosenWindow, Provider, Region, ScreenshotResult, Seat, Settings, SettingsInfo } from "../../shared/types";
 import { adviceColor, errorMessage } from "../common";
 import { Card, icons, Row, Stepper, ToggleRow } from "./components";
 import { WindowChooser } from "./WindowChooser";
@@ -21,8 +21,14 @@ const MODELS = [
 
 /** Settings as edited in the form: numbers stay as text until saved. */
 interface Form {
+  provider: Provider;
   api_key: string;
   model: string;
+  local_url: string;
+  local_model: string;
+  local_api_key: string;
+  local_max_side: string;
+  save_frames: boolean;
   interval: string;
   fast_reads: boolean;
   monitor: string;
@@ -43,6 +49,7 @@ function toForm(s: Settings): Form {
   return {
     ...s,
     interval: String(s.interval),
+    local_max_side: String(s.local_max_side),
     monitor: String(s.monitor),
     decks: String(s.decks),
     unit: s.unit == null ? "" : String(s.unit),
@@ -62,6 +69,7 @@ function fromForm(f: Form): { settings?: Settings; invalid: Invalid } {
   const decks = int("decks", 1, 8);
   const maxUnits = int("max_units", 1, 1000);
   const monitor = int("monitor", 1, 16);
+  const localMaxSide = int("local_max_side", 256, 2048);
   const interval = Number(f.interval);
   if (!Number.isFinite(interval) || interval < 0.5 || interval > 60) invalid.interval = true;
   const unit = f.unit.trim() === "" ? null : Number(f.unit);
@@ -70,7 +78,10 @@ function fromForm(f: Form): { settings?: Settings; invalid: Invalid } {
   return {
     invalid,
     settings: {
-      api_key: f.api_key.trim(), model: f.model.trim() || MODELS[0].id, interval, fast_reads: f.fast_reads, monitor,
+      provider: f.provider, api_key: f.api_key.trim(), model: f.model.trim() || MODELS[0].id,
+      local_url: f.local_url.trim(), local_model: f.local_model.trim(), local_api_key: f.local_api_key.trim(),
+      local_max_side: localMaxSide, save_frames: f.save_frames,
+      interval, fast_reads: f.fast_reads, monitor,
       capture: f.capture, region: f.region, window: f.window, seat: f.seat,
       dealer_hits_soft_17: f.dealer_hits_soft_17, double_after_split: f.double_after_split,
       surrender_allowed: f.surrender_allowed, counting: f.counting, decks, unit, max_units: maxUnits,
@@ -99,9 +110,11 @@ export default function App() {
         setInfo(i);
         setForm(toForm(i.settings));
         lastSaved.current = JSON.stringify(i.settings);
-        const hasKey = i.settings.api_key || i.env_api_key;
-        setStatus(hasKey ? "Ready. Open your blackjack table, then press Start." : "Add your Anthropic API key to get started.");
-        if (!hasKey) setPage("connection");
+        const ready = i.settings.provider === "local"
+          ? !!(i.settings.local_url && i.settings.local_model)
+          : !!(i.settings.api_key || i.env_api_key);
+        setStatus("Ready. Open your blackjack table, then press Start.");
+        if (!ready) setPage("connection");
       })
       .catch((e) => setError(errorMessage(e)));
     window.api.isRunning().then(setRunning);
@@ -169,7 +182,7 @@ export default function App() {
       setStatus("Watching your screen…");
     } catch (e) {
       setError(errorMessage(e));
-      if (/API key/i.test(errorMessage(e))) setPage("connection");
+      if (/API key|local model|model server/i.test(errorMessage(e))) setPage("connection");
     } finally {
       setBusy(false);
     }
@@ -203,7 +216,7 @@ export default function App() {
       <section className="hero">
         <div className="state">
           <h1><span className={`dot ${running ? "on" : ""}`} />{running ? "Running" : "Not running"}</h1>
-          {error ? <p className="error">{error}</p> : <p>{status}</p>}
+          {error ? <p className="error">{error}</p> : <p>{(!running && setupNeeded(form, info)) || status}</p>}
           {running && lastAdvice && (
             <p style={{ marginTop: 6 }}>
               Last advice: <b style={{ color: "#fff", background: adviceColor(lastAdvice.action, lastAdvice.bet_units), padding: "1px 8px", borderRadius: 6 }}>{lastAdvice.headline}</b>
@@ -243,6 +256,16 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+/** What still needs filling in before Start can work, or null. */
+function setupNeeded(form: Form, info: SettingsInfo): string | null {
+  if (form.provider === "local") {
+    if (!form.local_url.trim()) return "Enter your local model server’s address to get started.";
+    if (!form.local_model.trim()) return "Choose your local model to get started.";
+    return null;
+  }
+  return form.api_key.trim() || info.env_api_key ? null : "Add your Anthropic API key to get started.";
 }
 
 function TitleBar() {
@@ -405,7 +428,7 @@ function ScreenPage({ form, update, invalid }: PageProps & { invalid: Invalid })
           <span className="suffix">seconds</span>
         </Row>
         <ToggleRow title="Faster updates" checked={form.fast_reads} onChange={(v) => update("fast_reads", v)}
-          hint="Sends the next screenshot while the previous one is still being read, so advice arrives sooner. Uses up to about twice as many API calls." />
+          hint="Sends the next screenshot while the previous one is still being read, so advice arrives sooner. Uses up to about twice as many API calls with Claude. Ollama only overlaps reads if started with OLLAMA_NUM_PARALLEL=2 or more." />
       </Card>
       {choosing && (
         <WindowChooser
@@ -415,6 +438,82 @@ function ScreenPage({ form, update, invalid }: PageProps & { invalid: Invalid })
         />
       )}
     </>
+  );
+}
+
+const PROVIDERS: { id: Provider; label: string; hint: string }[] = [
+  { id: "anthropic", label: "Claude (cloud)", hint: "Most accurate. Needs an Anthropic API key and internet" },
+  { id: "local", label: "Local model", hint: "Your own Ollama, vLLM or LM Studio server. Free and offline" },
+];
+
+const LOCAL_PRESETS = [
+  { label: "Ollama", url: "http://localhost:11434/v1" },
+  { label: "vLLM", url: "http://localhost:8000/v1" },
+  { label: "LM Studio", url: "http://localhost:1234/v1" },
+];
+
+function LocalModelCard({ form, update }: PageProps) {
+  const [models, setModels] = useState<string[] | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function check() {
+    setChecking(true);
+    setMessage(null);
+    try {
+      const found = await window.api.request<string[]>("local_models", { url: form.local_url, api_key: form.local_api_key });
+      setModels(found);
+      setMessage(found.length
+        ? { ok: true, text: `Connected: ${found.length} model${found.length === 1 ? "" : "s"} available.` }
+        : { ok: false, text: "Connected, but the server has no models. Pull one first, e.g. ollama pull qwen2.5vl:7b" });
+      if (found.length && !found.includes(form.local_model)) update("local_model", found[0]);
+    } catch (e) {
+      setModels(null);
+      setMessage({ ok: false, text: errorMessage(e) });
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  useEffect(() => {
+    if (form.local_url) void check();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <Card>
+      <div className="row" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+        <div className="label">
+          <strong>Server address</strong>
+          <span>The OpenAI-compatible address of your model server.</span>
+        </div>
+        <div className="key-row">
+          <input className="input" spellCheck={false} value={form.local_url} placeholder="http://localhost:11434/v1"
+            onChange={(e) => update("local_url", e.target.value)} aria-label="Local server address" />
+          <button className="btn" disabled={checking || !form.local_url} onClick={check}>{checking ? "Checking…" : "Test connection"}</button>
+        </div>
+        <div className="presets">
+          {LOCAL_PRESETS.map((p) => (
+            <button key={p.label} type="button" className={`chip ${form.local_url === p.url ? "selected" : ""}`}
+              onClick={() => update("local_url", p.url)}>{p.label}</button>
+          ))}
+        </div>
+        {message && <div className={message.ok ? "ok-text" : "error-text"}>{message.text}</div>}
+      </div>
+      <Row title="Model" hint="A vision model, e.g. qwen2.5vl:7b or gemma3:12b on Ollama, or the Hugging Face name on vLLM.">
+        <input className="input" style={{ width: 230 }} list="local-models" spellCheck={false} value={form.local_model}
+          placeholder="qwen2.5vl:7b" onChange={(e) => update("local_model", e.target.value)} aria-label="Local model" />
+        <datalist id="local-models">{(models ?? []).map((m) => <option key={m} value={m} />)}</datalist>
+      </Row>
+      <Row title="API key" hint="Only if your server needs one (e.g. vLLM started with --api-key). Leave empty for Ollama.">
+        <input className="input" style={{ width: 230 }} type="password" spellCheck={false} value={form.local_api_key}
+          onChange={(e) => update("local_api_key", e.target.value)} aria-label="Local server API key" />
+      </Row>
+      <Row title="Image size" hint="Longest side of the screenshot sent to the model. Smaller is faster; go up if cards are misread.">
+        <Stepper label="image size in pixels" value={form.local_max_side} min={256} max={2048} step={128}
+          onChange={(v) => update("local_max_side", v)} />
+        <span className="suffix">px</span>
+      </Row>
+    </Card>
   );
 }
 
@@ -444,35 +543,52 @@ function ConnectionPage({ form, update, info }: PageProps & { info: SettingsInfo
   return (
     <>
       <h2>Connection</h2>
-      <p className="lead">The assistant uses Claude to read the cards on your screen.</p>
+      <p className="lead">Choose what reads the cards on your screen.</p>
       <Card>
-        <div className="row" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
-          <div className="label">
-            <strong>Anthropic API key</strong>
-            <span>
-              Create one in the <a onClick={() => window.api.openExternal("https://console.anthropic.com/settings/keys")}>Anthropic Console</a>.
-              {info.env_api_key && !form.api_key && " Currently using the ANTHROPIC_API_KEY environment variable."}
-            </span>
-          </div>
-          <div className="key-row">
-            <input className="input" type={showKey ? "text" : "password"} placeholder="sk-ant-…" spellCheck={false}
-              value={form.api_key} onChange={(e) => update("api_key", e.target.value)} aria-label="Anthropic API key" />
-            <button className="btn" type="button" onClick={() => setShowKey((s) => !s)}>{showKey ? "Hide" : "Show"}</button>
-          </div>
-          <div className="mono">Saved on this PC in {info.config_path}</div>
-        </div>
-      </Card>
-      <Card>
-        <div className="choices" role="radiogroup" aria-label="Model">
-          {MODELS.map((m) => (
-            <label key={m.id} className={`choice ${form.model === m.id ? "selected" : ""}`}>
-              <input type="radio" name="model" checked={form.model === m.id} onChange={() => update("model", m.id)} />
-              <div className="label"><strong>{m.name}</strong><span>{m.hint}</span></div>
-              <span className="tag">{m.tag}</span>
-            </label>
+        <div className="segmented two" role="radiogroup" aria-label="Card reader">
+          {PROVIDERS.map((o) => (
+            <button key={o.id} type="button" role="radio" aria-checked={form.provider === o.id}
+              className={form.provider === o.id ? "selected" : ""} onClick={() => update("provider", o.id)}>
+              <strong>{o.label}</strong>
+              <span>{o.hint}</span>
+            </button>
           ))}
         </div>
       </Card>
+      {form.provider === "anthropic" ? (
+        <>
+          <Card>
+            <div className="row" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+              <div className="label">
+                <strong>Anthropic API key</strong>
+                <span>
+                  Create one in the <a onClick={() => window.api.openExternal("https://console.anthropic.com/settings/keys")}>Anthropic Console</a>.
+                  {info.env_api_key && !form.api_key && " Currently using the ANTHROPIC_API_KEY environment variable."}
+                </span>
+              </div>
+              <div className="key-row">
+                <input className="input" type={showKey ? "text" : "password"} placeholder="sk-ant-…" spellCheck={false}
+                  value={form.api_key} onChange={(e) => update("api_key", e.target.value)} aria-label="Anthropic API key" />
+                <button className="btn" type="button" onClick={() => setShowKey((s) => !s)}>{showKey ? "Hide" : "Show"}</button>
+              </div>
+              <div className="mono">Saved on this PC in {info.config_path}</div>
+            </div>
+          </Card>
+          <Card>
+            <div className="choices" role="radiogroup" aria-label="Model">
+              {MODELS.map((m) => (
+                <label key={m.id} className={`choice ${form.model === m.id ? "selected" : ""}`}>
+                  <input type="radio" name="model" checked={form.model === m.id} onChange={() => update("model", m.id)} />
+                  <div className="label"><strong>{m.name}</strong><span>{m.hint}</span></div>
+                  <span className="tag">{m.tag}</span>
+                </label>
+              ))}
+            </div>
+          </Card>
+        </>
+      ) : (
+        <LocalModelCard form={form} update={update} />
+      )}
       <Card>
         <Row title="Test with a screenshot" hint="Pick a saved screenshot of your game to check the key works and the cards are read correctly.">
           <button className="btn" disabled={testing} onClick={test}>{testing ? "Reading…" : "Choose screenshot…"}</button>
@@ -493,6 +609,13 @@ function ConnectionPage({ form, update, info }: PageProps & { info: SettingsInfo
             </dl>
           </div>
         )}
+      </Card>
+      <Card>
+        <ToggleRow title="Save screenshots for testing" checked={form.save_frames} onChange={(v) => update("save_frames", v)}
+          hint="Keeps every screenshot that's read and what was read from it, so you can label some and compare models with python -m blackjack_assistant.evaluate." />
+        <Row title="Saved screenshots" hint={info.frames_dir}>
+          <button className="btn" onClick={() => void window.api.openFramesFolder()}>Open folder</button>
+        </Row>
       </Card>
     </>
   );

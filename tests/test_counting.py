@@ -36,7 +36,7 @@ def test_bet_ramp(tc, units, headline):
 
 
 def table(**kw):
-    base = dict(table_visible=True, dealer_cards=[], player_hands=[], active_hand_index=0, is_player_turn=False,
+    base = dict(table_visible=True, dealer_cards=[], player_hands=[], player_hand_totals=[], dealer_total_shown="", active_hand_index=0, is_player_turn=False,
                 available_actions=[], other_players_cards=[], is_betting_phase=False, round_complete=False,
                 shuffle_detected=False, insurance_offered=False, confident=True)
     base.update(kw)

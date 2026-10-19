@@ -9,7 +9,7 @@ from blackjack_assistant.vision import TableState
 
 def state(**kw):
     base = dict(table_visible=True, dealer_cards=["6"], player_hands=[["5", "6"]], active_hand_index=0,
-                is_player_turn=True, available_actions=[], other_players_cards=[], is_betting_phase=False,
+                player_hand_totals=[], dealer_total_shown="", is_player_turn=True, available_actions=[], other_players_cards=[], is_betting_phase=False,
                 round_complete=False, shuffle_detected=False, insurance_offered=False, confident=True)
     base.update(kw)
     return TableState(**base)

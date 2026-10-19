@@ -7,6 +7,8 @@ import base64
 import anthropic
 from pydantic import BaseModel, Field
 
+from .reconcile import reconcile_table
+
 DEFAULT_MODEL = "claude-opus-5-5"
 
 SYSTEM_PROMPT = """You read screenshots of blackjack games (online casino, app, or \
@@ -15,8 +17,15 @@ video of a live table) and report exactly what cards are visible.
 Rules:
 - Write each card as its rank (A, 2-10, J, Q, K) followed by its suit symbol \
 (♠ ♥ ♦ ♣), e.g. "10♣", "A♥", "7♠". If a card's suit can't be made out, write the rank alone.
+- List each physical card exactly ONCE. Live-dealer games usually show every card twice: \
+the real card in the video and again as a digital card graphic, card icon or "card \
+history" next to the seat or the dealer. These are the same card, not two cards: never \
+list both. A hand that looks like "K 4 4" or "K K 4 4" is almost always "K 4" seen twice.
 - The dealer normally shows one face-up card (the upcard) and one face-down card. \
 Report only the face-up card(s).
+- player_hand_totals: for each of the player's hands, the hand value the game itself \
+displays (e.g. "14", "4/14", "Soft 17", "BJ"), copied exactly; "" if none is shown. \
+dealer_total_shown: the same for the dealer. These are used to double-check the cards.
 - player_hands is ONLY the hand(s) of "the player": the person whose screen this is. \
 Never put another seat's cards in player_hands. If the player has split, list each of \
 their hands separately and say which one is currently being played.
@@ -58,6 +67,9 @@ class TableState(BaseModel):
     table_visible: bool = Field(description="Whether a blackjack table is on screen")
     dealer_cards: list[str] = Field(description="Dealer's face-up cards, e.g. ['K♠']")
     player_hands: list[list[str]] = Field(description="Each of the player's hands as a list of cards, e.g. [['9♥', '5♠']]")
+    player_hand_totals: list[str] = Field(
+        description="Hand value displayed by the game for each player hand, e.g. ['14'] or ['4/14']; '' if not shown")
+    dealer_total_shown: str = Field(description="Dealer hand value displayed by the game, e.g. '10'; '' if not shown")
     active_hand_index: int = Field(description="Index into player_hands of the hand being played; 0 if not split")
     is_player_turn: bool = Field(description="True if the game is waiting for the player's decision")
     available_actions: list[str] = Field(
@@ -120,4 +132,4 @@ class TableReader:
             raise VisionError("The model declined to read this screenshot")
         if response.stop_reason == "max_tokens" or response.parsed_output is None:
             raise VisionError(f"Could not parse table state (stop_reason={response.stop_reason})")
-        return response.parsed_output
+        return reconcile_table(response.parsed_output)

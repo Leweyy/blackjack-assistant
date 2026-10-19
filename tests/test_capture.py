@@ -129,7 +129,7 @@ def _frame(color):
 
 def _table(dealer):
     from blackjack_assistant.vision import TableState
-    return TableState(table_visible=True, dealer_cards=[dealer], player_hands=[["9♥", "5♠"]], active_hand_index=0,
+    return TableState(table_visible=True, dealer_cards=[dealer], player_hands=[["9♥", "5♠"]], player_hand_totals=[], dealer_total_shown="", active_hand_index=0,
                       is_player_turn=True, available_actions=[], other_players_cards=[], is_betting_phase=False,
                       round_complete=False, shuffle_detected=False, insurance_offered=False, confident=True)
 

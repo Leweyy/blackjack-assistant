@@ -72,7 +72,9 @@ Electron app (React/TSX)  ── JSON over stdin/stdout ──  Python backend
    skipped.
 2. **Read the table:** the screenshot goes to Claude, which returns structured JSON:
    the dealer's cards, your hand(s), other players' cards, whether it's your turn, the
-   betting phase, the end of a round, shuffles, and the visible buttons.
+   betting phase, the end of a round, shuffles, and the visible buttons. Live games show
+   each card twice (on video and as a digital copy), so each hand is checked against the
+   total the game displays, and a card read twice is dropped.
 3. **Decide:** a local, deterministic strategy engine (`strategy.py`) picks the move.
    The AI only reads the cards; it doesn't choose the move. The engine uses basic
    strategy for your rules, adjusted by the true count when counting is on.

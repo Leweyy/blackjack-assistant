@@ -34,3 +34,20 @@ def test_env_key_fallback(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
     assert config.Settings().effective_api_key() == "env-key"
     assert config.Settings(api_key=" mine ").effective_api_key() == "mine"
+
+
+def test_capture_mode_migration_and_validation(monkeypatch):
+    assert config.from_dict({"region": [1, 2, 300, 400]}).capture == "region"
+    assert config.from_dict({}).capture == "monitor"
+    assert config.from_dict({"capture": "nonsense"}).capture == "monitor"
+    assert config.from_dict({"window": {"handle": "x", "title": 3}}).window is None
+
+    s = config.from_dict({"capture": "window", "window": {"handle": 42, "title": "Live Blackjack"}})
+    assert s.window == {"handle": 42, "title": "Live Blackjack"}
+    monkeypatch.setattr(config.sys, "platform", "win32")
+    assert config.validate(s) == []
+    monkeypatch.setattr(config.sys, "platform", "linux")
+    assert any("only available on Windows" in p for p in config.validate(s))
+
+    assert any("Choose a window" in p for p in config.validate(config.Settings(capture="window")))
+    assert any("Select a table area" in p for p in config.validate(config.Settings(capture="region")))

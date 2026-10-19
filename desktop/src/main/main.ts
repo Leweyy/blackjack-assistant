@@ -1,9 +1,9 @@
 // Electron main process: windows, the region picker, and the bridge to the Python backend.
 
 import path from "node:path";
-import { app, BrowserWindow, Display, dialog, ipcMain, Rectangle, screen, shell } from "electron";
+import { app, BrowserWindow, desktopCapturer, Display, dialog, ipcMain, Rectangle, screen, shell } from "electron";
 import { Backend } from "./backend";
-import type { BackendEvent, Region, RendererMethod } from "../shared/types";
+import type { BackendEvent, Region, RendererMethod, WindowSource } from "../shared/types";
 
 const RENDERER_METHODS: RendererMethod[] = ["get_settings", "save_settings", "test_screenshot", "reset_count"];
 const BG = "#0e1116";
@@ -95,6 +95,9 @@ function createOverlay(): void {
   });
   overlayWindow.setAlwaysOnTop(true, "screen-saver");
   overlayWindow.setVisibleOnAllWorkspaces(true);
+  // Keep the overlay out of screen captures so it can never hide cards from the backend
+  // (Windows 10 2004+ and macOS; elsewhere it has no effect).
+  overlayWindow.setContentProtection(true);
   lockDown(overlayWindow);
   overlayWindow.on("closed", () => {
     overlayWindow = null;
@@ -173,6 +176,27 @@ function pickRegion(): Promise<Region | null> {
   return pickerInProgress;
 }
 
+// ---- window picker --------------------------------------------------------
+
+async function listWindows(): Promise<WindowSource[]> {
+  const own = new Set(BrowserWindow.getAllWindows().map((w) => w.getMediaSourceId()));
+  const sources = await desktopCapturer.getSources({
+    types: ["window"],
+    thumbnailSize: { width: 320, height: 200 },
+    fetchWindowIcons: true,
+  });
+  return sources
+    .filter((s) => !own.has(s.id) && s.name.trim() !== "")
+    .map((s) => ({
+      id: s.id,
+      // Source ids look like "window:<handle>:0"; on Windows the handle is the HWND.
+      handle: Number(s.id.split(":")[1]) || 0,
+      title: s.name,
+      thumbnail: s.thumbnail.isEmpty() ? "" : s.thumbnail.toDataURL(),
+      icon: s.appIcon && !s.appIcon.isEmpty() ? s.appIcon.toDataURL() : null,
+    }));
+}
+
 // ---- IPC ------------------------------------------------------------------
 
 function registerIpc(): void {
@@ -190,6 +214,7 @@ function registerIpc(): void {
   });
   ipcMain.handle("session:running", () => running);
   ipcMain.handle("region:pick", () => pickRegion());
+  ipcMain.handle("windows:list", () => listWindows());
   ipcMain.handle("dialog:openImage", async () => {
     const options: Electron.OpenDialogOptions = {
       title: "Choose a screenshot of your blackjack game",

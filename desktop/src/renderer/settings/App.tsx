@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Advice, Region, ScreenshotResult, Settings, SettingsInfo } from "../../shared/types";
+import type { Advice, CaptureMode, ChosenWindow, Region, ScreenshotResult, Settings, SettingsInfo } from "../../shared/types";
 import { adviceColor, errorMessage } from "../common";
 import { Card, icons, Row, Stepper, ToggleRow } from "./components";
+import { WindowChooser } from "./WindowChooser";
 
 type Page = "rules" | "counting" | "screen" | "connection";
 
@@ -24,7 +25,9 @@ interface Form {
   model: string;
   interval: string;
   monitor: string;
+  capture: CaptureMode;
   region: Region | null;
+  window: ChosenWindow | null;
   dealer_hits_soft_17: boolean;
   double_after_split: boolean;
   surrender_allowed: boolean;
@@ -65,7 +68,8 @@ function fromForm(f: Form): { settings?: Settings; invalid: Invalid } {
   return {
     invalid,
     settings: {
-      api_key: f.api_key.trim(), model: f.model.trim() || MODELS[0].id, interval, monitor, region: f.region,
+      api_key: f.api_key.trim(), model: f.model.trim() || MODELS[0].id, interval, monitor,
+      capture: f.capture, region: f.region, window: f.window,
       dealer_hits_soft_17: f.dealer_hits_soft_17, double_after_split: f.double_after_split,
       surrender_allowed: f.surrender_allowed, counting: f.counting, decks, unit, max_units: maxUnits,
     },
@@ -284,8 +288,17 @@ function CountingPage({ form, update, invalid }: PageProps & { invalid: Invalid 
   );
 }
 
+const CAPTURE_OPTIONS: { id: CaptureMode; label: string; hint: string }[] = [
+  { id: "window", label: "A window", hint: "Follows the game window when you move or resize it" },
+  { id: "region", label: "Table area", hint: "A fixed rectangle on your screen" },
+  { id: "monitor", label: "Whole monitor", hint: "Everything on one monitor" },
+];
+
 function ScreenPage({ form, update, invalid }: PageProps & { invalid: Invalid }) {
   const [picking, setPicking] = useState(false);
+  const [choosing, setChoosing] = useState(false);
+  const windowsSupported = window.api.platform === "win32";
+
   async function pick() {
     setPicking(true);
     try {
@@ -299,31 +312,55 @@ function ScreenPage({ form, update, invalid }: PageProps & { invalid: Invalid })
   const sw = window.screen.width * window.devicePixelRatio;
   const sh = window.screen.height * window.devicePixelRatio;
   const pct = (v: number, total: number) => Math.max(0, Math.min(100, (v / total) * 100));
+
   return (
     <>
       <h2>Screen</h2>
       <p className="lead">Tell the assistant where your blackjack table is.</p>
       <Card>
-        <div className="region-preview">
-          <div className="screen" aria-hidden>
-            {r
-              ? <div className="area" style={{
+        <div className="segmented" role="radiogroup" aria-label="What to watch">
+          {CAPTURE_OPTIONS.map((o) => {
+            const disabled = o.id === "window" && !windowsSupported;
+            return (
+              <button key={o.id} type="button" role="radio" aria-checked={form.capture === o.id} disabled={disabled}
+                className={form.capture === o.id ? "selected" : ""} onClick={() => update("capture", o.id)}
+                title={disabled ? "Window capture is only available on Windows" : o.hint}>
+                <strong>{o.label}</strong>
+                <span>{disabled ? "Windows only" : o.hint}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {form.capture === "window" && (
+          <Row title={form.window ? form.window.title : "No window chosen"}
+            hint="Pick the browser or casino app window showing the table. Keep it visible (not minimised); the advice overlay is hidden from captures, so it can sit on top.">
+            <button className="btn primary" onClick={() => setChoosing(true)}>{form.window ? "Change window" : "Choose window"}</button>
+          </Row>
+        )}
+
+        {form.capture === "region" && (
+          <>
+            <div className="region-preview">
+              <div className="screen" aria-hidden>
+                {r && <div className="area" style={{
                   left: `${pct(r[0], sw)}%`, top: `${pct(r[1], sh)}%`,
                   width: `${Math.min(100 - pct(r[0], sw), pct(r[2], sw))}%`, height: `${Math.min(100 - pct(r[1], sh), pct(r[3], sh))}%`,
-                }} />
-              : <div className="area" style={{ inset: 0 }} />}
-          </div>
-          <div className="info">
-            <strong>{r ? `Table area: ${r[2]} × ${r[3]} px` : "Watching the whole monitor"}</strong>
-            <span>Select an area that covers the whole table, including other players’ seats so every card can be counted. A smaller area is also cheaper and more accurate.</span>
-          </div>
-        </div>
-        <Row title="Table area" hint={r ? `Starts at (${r[0]}, ${r[1]}) on your desktop.` : "No area selected."}>
-          {r && <button className="btn" onClick={() => update("region", null)}>Use whole monitor</button>}
-          <button className="btn primary" disabled={picking} onClick={pick}>Select table area</button>
-        </Row>
-        {!r && (
-          <Row title="Monitor" hint="Which monitor to watch when no area is selected.">
+                }} />}
+              </div>
+              <div className="info">
+                <strong>{r ? `Table area: ${r[2]} × ${r[3]} px` : "No area selected yet"}</strong>
+                <span>Cover the whole table, including other players’ seats so every card can be counted. A smaller area is also cheaper and more accurate.</span>
+              </div>
+            </div>
+            <Row title="Table area" hint={r ? `Starts at (${r[0]}, ${r[1]}) on your desktop.` : "Drag a box around the table on screen."}>
+              <button className="btn primary" disabled={picking} onClick={pick}>{r ? "Select again" : "Select table area"}</button>
+            </Row>
+          </>
+        )}
+
+        {form.capture === "monitor" && (
+          <Row title="Monitor" hint="Which monitor to watch. A window or table area is cheaper and more accurate.">
             <Stepper label="monitor" value={form.monitor} min={1} max={6} onChange={(v) => update("monitor", v)} />
           </Row>
         )}
@@ -336,6 +373,13 @@ function ScreenPage({ form, update, invalid }: PageProps & { invalid: Invalid })
           <span className="suffix">seconds</span>
         </Row>
       </Card>
+      {choosing && (
+        <WindowChooser
+          selected={form.window?.handle ?? null}
+          onPick={(w) => { update("window", { handle: w.handle, title: w.title }); setChoosing(false); }}
+          onClose={() => setChoosing(false)}
+        />
+      )}
     </>
   );
 }

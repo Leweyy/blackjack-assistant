@@ -9,6 +9,8 @@ const api: Api = {
   stopSession: () => ipcRenderer.invoke("session:stop"),
   isRunning: () => ipcRenderer.invoke("session:running"),
   pickRegion: () => ipcRenderer.invoke("region:pick"),
+  listWindows: () => ipcRenderer.invoke("windows:list"),
+  platform: process.platform,
   openImage: () => ipcRenderer.invoke("dialog:openImage"),
   openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),
   closeOverlay: () => ipcRenderer.send("overlay:close"),

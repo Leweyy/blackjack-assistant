@@ -27,8 +27,15 @@ There's no auto-update yet. To update, download the new version from Releases.
 2. **Table rules:** match your table: whether the dealer hits soft 17, double after
    split, and surrender.
 3. **Counting & bets:** decks in the shoe, your betting unit and your maximum bet.
-4. **Screen:** click **Select table area** and drag a box around the table. Include
-   the other players' seats so every card can be counted.
+4. **Screen:** choose what to watch:
+   - **A window** (Windows only): pick the browser or casino-app window from the list
+     of thumbnails. It follows the window when you move or resize it. Keep it visible
+     (not minimised).
+   - **Table area:** drag a box around the table. Include the other players' seats so
+     every card can be counted.
+   - **Whole monitor:** simplest option, but costs more and is less accurate.
+
+   The advice overlay is hidden from screen captures, so it can sit on top of the game.
 5. Press **Start**. The advice window appears in the top-right corner. Drag it anywhere.
    - **↺ New shoe** (or **R**) resets the count if a shuffle wasn't detected.
    - **✕** (or **Esc**) stops watching.
@@ -154,7 +161,8 @@ To publish from your own machine instead, build the backend, then run
 `npm run release` in `desktop/`. It does the same thing using the `gh` CLI.
 
 There's also a command-line version that prints advice in a terminal:
-`python -m blackjack_assistant --region 200,150,1100,700` (see `--help`).
+`python -m blackjack_assistant --region 200,150,1100,700` or
+`--window "Live Blackjack"` (see `--help`).
 
 | Path | What |
 |---|---|

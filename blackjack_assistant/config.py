@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
@@ -29,7 +30,9 @@ class Settings:
     model: str = DEFAULT_MODEL
     interval: float = 1.5
     monitor: int = 1
-    region: list[int] | None = None  # [left, top, width, height]; None = whole monitor
+    capture: str = "monitor"  # what to watch: "monitor", "region" or "window"
+    region: list[int] | None = None  # [left, top, width, height], used when capture == "region"
+    window: dict | None = None  # {"handle": int, "title": str}, used when capture == "window"
     dealer_hits_soft_17: bool = False
     double_after_split: bool = True
     surrender_allowed: bool = True
@@ -47,8 +50,16 @@ class Settings:
     def screen_region(self) -> Region | None:
         return Region(*self.region) if self.region else None
 
+    def grabber(self):
+        """A screen grabber for the chosen capture mode. Create it on the thread that uses it."""
+        from .capture import make_grabber
+        return make_grabber(self.capture, self.screen_region(), self.monitor, self.window)
+
     def effective_api_key(self) -> str:
         return self.api_key.strip() or os.environ.get("ANTHROPIC_API_KEY", "")
+
+
+CAPTURE_MODES = ("monitor", "region", "window")
 
 
 def from_dict(data) -> Settings:
@@ -73,6 +84,13 @@ def from_dict(data) -> Settings:
     if s.region is not None and not (isinstance(s.region, list) and len(s.region) == 4
                                      and all(isinstance(v, int) for v in s.region)):
         s.region = None
+    if s.window is not None and not (isinstance(s.window, dict) and isinstance(s.window.get("handle"), int)
+                                     and isinstance(s.window.get("title"), str)):
+        s.window = None
+    if "capture" not in data:  # settings saved before window capture existed
+        s.capture = "region" if s.region else "monitor"
+    if s.capture not in CAPTURE_MODES:
+        s.capture = "monitor"
     return s
 
 
@@ -91,6 +109,13 @@ def validate(s: Settings) -> list[str]:
         problems.append("Betting unit must be greater than 0.")
     if s.region is not None and (s.region[2] < 20 or s.region[3] < 20):
         problems.append("The selected screen area is too small.")
+    if s.capture == "region" and not s.region:
+        problems.append("Select a table area in Screen, or choose another capture option.")
+    if s.capture == "window":
+        if not s.window:
+            problems.append("Choose a window in Screen, or choose another capture option.")
+        elif sys.platform != "win32":
+            problems.append("Window capture is only available on Windows. Use a table area instead.")
     return problems
 
 

@@ -3,12 +3,31 @@
 
 export type Region = [left: number, top: number, width: number, height: number];
 
+export type CaptureMode = "monitor" | "region" | "window";
+
+/** A window the user picked to watch. `handle` is the Windows HWND. */
+export interface ChosenWindow {
+  handle: number;
+  title: string;
+}
+
+/** An open window offered in the window picker. */
+export interface WindowSource {
+  id: string;
+  handle: number;
+  title: string;
+  thumbnail: string; // data: URL
+  icon: string | null; // data: URL
+}
+
 export interface Settings {
   api_key: string;
   model: string;
   interval: number;
   monitor: number;
+  capture: CaptureMode;
   region: Region | null;
+  window: ChosenWindow | null;
   dealer_hits_soft_17: boolean;
   double_after_split: boolean;
   surrender_allowed: boolean;
@@ -67,6 +86,8 @@ export interface Api {
   stopSession(): Promise<void>;
   isRunning(): Promise<boolean>;
   pickRegion(): Promise<Region | null>;
+  listWindows(): Promise<WindowSource[]>;
+  platform: string;
   openImage(): Promise<string | null>;
   openExternal(url: string): Promise<void>;
   closeOverlay(): void;

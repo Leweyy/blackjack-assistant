@@ -142,7 +142,7 @@ class Server:
                 self.event("stopped")
 
         session = Session(api_key=s.effective_api_key(), model=s.model, rules=s.rules(), bets=s.bets(),
-                          interval=s.interval, region=s.screen_region(), monitor=s.monitor,
+                          interval=s.interval, make_grabber=s.grabber,
                           counting=s.counting, decks=s.decks, emit=emit, on_exit=on_exit)
         self._session = session
         session.start()
@@ -201,6 +201,15 @@ def self_test() -> int:
     from .capture import ScreenGrabber, to_png
     enable_dpi_awareness()
     assert to_png(ScreenGrabber().grab())
+    if sys.platform == "win32":
+        # Exercise the window-capture calls (ctypes signatures only show up on real Windows).
+        from .windows import Win32Windows
+        api = Win32Windows()
+        handle = api.find("Program Manager")  # the desktop window, present in every session
+        if handle:
+            assert api.is_window(handle)
+            api.is_minimized(handle)
+            api.rect(handle)
     anthropic.Anthropic(api_key="self-test")
     print("self-test ok", file=sys.stderr)
     return 0

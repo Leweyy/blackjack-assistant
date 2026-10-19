@@ -8,7 +8,7 @@ import threading
 from pathlib import Path
 
 from .advisor import Advice, BetSettings, advise
-from .capture import Region, ScreenGrabber
+from .capture import CaptureError, Region, ScreenGrabber, WindowGrabber
 from .counting import HiLoCounter, RoundTracker
 from .engine import watch_loop
 from .strategy import Rules
@@ -22,6 +22,7 @@ def parse_args(argv=None):
     )
     p.add_argument("--interval", type=float, default=1.5, help="Seconds between screen checks (default 1.5)")
     p.add_argument("--region", type=Region.parse, help="Screen area to watch: left,top,width,height")
+    p.add_argument("--window", metavar="TITLE", help="Watch the window with this title (Windows only)")
     p.add_argument("--monitor", type=int, default=1, help="Monitor number when no region is given (default 1)")
     p.add_argument("--h17", action="store_true", help="Dealer hits soft 17 (default: stands)")
     p.add_argument("--no-das", action="store_true", help="Double after split NOT allowed")
@@ -55,7 +56,14 @@ def main(argv=None) -> int:
         print(state.model_dump_json(indent=2))
         return 0
 
-    grabber = ScreenGrabber(region=args.region, monitor=args.monitor)
+    if args.window:
+        try:
+            grabber = WindowGrabber(0, args.window)
+        except CaptureError as e:
+            print(e, file=sys.stderr)
+            return 1
+    else:
+        grabber = ScreenGrabber(region=args.region, monitor=args.monitor)
     stop = threading.Event()
 
     def emit(item):

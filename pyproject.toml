@@ -1,0 +1,28 @@
+[project]
+name = "blackjack-assistant"
+version = "0.1.0"
+description = "Watches your screen while you play blackjack and recommends your next move"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=1.15",
+    "mss>=9.0",
+    "pillow>=10.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+blackjack-assistant = "blackjack_assistant.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["blackjack_assistant"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

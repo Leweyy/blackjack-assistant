@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Advice, CaptureMode, ChosenWindow, Region, ScreenshotResult, Settings, SettingsInfo } from "../../shared/types";
 import { adviceColor, errorMessage } from "../common";
 import { Card, icons, Row, Stepper, ToggleRow } from "./components";
+import { SeatMarker } from "./SeatMarker";
 import { WindowChooser } from "./WindowChooser";
 
 type Page = "rules" | "counting" | "screen" | "connection";
@@ -28,6 +29,7 @@ interface Form {
   capture: CaptureMode;
   region: Region | null;
   window: ChosenWindow | null;
+  seat: [number, number] | null;
   dealer_hits_soft_17: boolean;
   double_after_split: boolean;
   surrender_allowed: boolean;
@@ -69,7 +71,7 @@ function fromForm(f: Form): { settings?: Settings; invalid: Invalid } {
     invalid,
     settings: {
       api_key: f.api_key.trim(), model: f.model.trim() || MODELS[0].id, interval, monitor,
-      capture: f.capture, region: f.region, window: f.window,
+      capture: f.capture, region: f.region, window: f.window, seat: f.seat,
       dealer_hits_soft_17: f.dealer_hits_soft_17, double_after_split: f.double_after_split,
       surrender_allowed: f.surrender_allowed, counting: f.counting, decks, unit, max_units: maxUnits,
     },
@@ -142,7 +144,15 @@ export default function App() {
     return () => clearTimeout(t);
   }, [JSON.stringify(parsed?.settings), save]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const update = <K extends keyof Form>(key: K, value: Form[K]) => setForm((f) => (f ? { ...f, [key]: value } : f));
+  const update = <K extends keyof Form>(key: K, value: Form[K]) => setForm((f) => {
+    if (!f) return f;
+    const next = { ...f, [key]: value };
+    // A marked seat is a spot in the captured image, so it's stale once the framing changes.
+    const reframed = (key === "capture" || key === "region" || key === "window")
+      && JSON.stringify(f[key]) !== JSON.stringify(value);
+    if (reframed) next.seat = null;
+    return next;
+  });
 
   // ---- actions ----
   async function start() {
@@ -297,6 +307,7 @@ const CAPTURE_OPTIONS: { id: CaptureMode; label: string; hint: string }[] = [
 function ScreenPage({ form, update, invalid }: PageProps & { invalid: Invalid }) {
   const [picking, setPicking] = useState(false);
   const [choosing, setChoosing] = useState(false);
+  const [markingSeat, setMarkingSeat] = useState(false);
   const windowsSupported = window.api.platform === "win32";
 
   async function pick() {
@@ -366,6 +377,15 @@ function ScreenPage({ form, update, invalid }: PageProps & { invalid: Invalid })
         )}
       </Card>
       <Card>
+        <Row title="Your seat"
+          hint={form.seat
+            ? "Marked. A “YOU” ring is drawn at your seat on every screenshot so only your cards are used for advice. Mark it again if the table layout changes."
+            : "Detected automatically. If the advice follows another player’s hand, mark your seat so the assistant knows which cards are yours."}>
+          {form.seat && <button className="btn" onClick={() => update("seat", null)}>Detect automatically</button>}
+          <button className="btn primary" onClick={() => setMarkingSeat(true)}>{form.seat ? "Mark again" : "Mark my seat"}</button>
+        </Row>
+      </Card>
+      <Card>
         <Row title="Check every" hint="Each check of a live video feed is one API call. 3 seconds roughly halves the cost of 1.5; counting still works because rounds are counted when they finish.">
           <span style={{ outline: invalid.interval ? "1px solid var(--danger)" : undefined, borderRadius: 8 }}>
             <Stepper label="seconds between checks" value={form.interval} min={0.5} max={10} step={0.5} onChange={(v) => update("interval", v)} />
@@ -373,6 +393,13 @@ function ScreenPage({ form, update, invalid }: PageProps & { invalid: Invalid })
           <span className="suffix">seconds</span>
         </Row>
       </Card>
+      {markingSeat && (
+        <SeatMarker
+          initial={form.seat}
+          onSave={(seat) => { update("seat", seat); setMarkingSeat(false); }}
+          onClose={() => setMarkingSeat(false)}
+        />
+      )}
       {choosing && (
         <WindowChooser
           selected={form.window?.handle ?? null}
@@ -446,6 +473,7 @@ function ConnectionPage({ form, update, info }: PageProps & { info: SettingsInfo
         {testError && <div className="result" style={{ color: "#ff8f88" }}>{testError}</div>}
         {result && t && (
           <div className="result">
+            {result.image && <img className="sent-image" src={result.image} alt="The screenshot as sent to Claude" />}
             <span className="advice-pill" style={{ background: adviceColor(result.advice.action, result.advice.bet_units) }}>{result.advice.headline}</span>
             {result.advice.detail}
             <dl>

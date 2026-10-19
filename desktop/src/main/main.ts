@@ -61,6 +61,8 @@ function createMainWindow(): void {
     webPreferences: secureWebPreferences(),
   });
   lockDown(mainWindow);
+  // Never let the settings window end up in what the backend sees, even if it overlaps the game.
+  mainWindow.setContentProtection(true);
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -215,6 +217,17 @@ function registerIpc(): void {
   ipcMain.handle("session:running", () => running);
   ipcMain.handle("region:pick", () => pickRegion());
   ipcMain.handle("windows:list", () => listWindows());
+  ipcMain.handle("capture:preview", async () => {
+    // Get the settings window out of the way so the snapshot shows the table, not this app.
+    mainWindow?.hide();
+    await new Promise((r) => setTimeout(r, 350));
+    try {
+      return await backend.request("capture_preview");
+    } finally {
+      mainWindow?.show();
+      mainWindow?.focus();
+    }
+  });
   ipcMain.handle("dialog:openImage", async () => {
     const options: Electron.OpenDialogOptions = {
       title: "Choose a screenshot of your blackjack game",

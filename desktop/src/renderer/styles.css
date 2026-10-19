@@ -252,3 +252,21 @@ body.overlay-body #root { height: auto; padding: 8px; }
 .window-card .title { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12.5px; }
 .window-card .title img { width: 16px; height: 16px; flex: none; }
 .window-card .title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- seat marker ---------- */
+
+.seat-body { padding: 14px 16px 18px; overflow-y: auto; }
+.seat-body .lead { margin: 0 0 12px; }
+.seat-body .empty { color: var(--muted); text-align: center; padding: 40px 0; }
+.seat-body .empty.error { color: #ff8f88; }
+.seat-canvas { position: relative; width: fit-content; max-width: 100%; margin: 0 auto; line-height: 0; }
+.seat-canvas img { max-width: 100%; max-height: 52vh; border-radius: 8px; cursor: crosshair; display: block; }
+.seat-ring {
+  position: absolute; aspect-ratio: 1; transform: translate(-50%, -50%);
+  border: 3px solid #ff00ff; border-radius: 50%; box-shadow: 0 0 0 2px #000, inset 0 0 0 2px #000; pointer-events: none;
+}
+.seat-ring span {
+  position: absolute; left: 50%; bottom: 100%; transform: translate(-50%, -4px); line-height: 1;
+  color: #ff00ff; font-weight: 800; font-size: 13px; text-shadow: 0 0 3px #000, 0 0 3px #000;
+}
+.result .sent-image { display: block; max-width: 100%; max-height: 220px; border-radius: 8px; margin-bottom: 10px; }

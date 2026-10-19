@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import mss
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageDraw
 
 # Longest side sent to the API. Cards stay legible and requests stay cheap.
 MAX_SIDE = 1568
@@ -115,6 +115,38 @@ def make_grabber(capture: str, region: Region | None = None, monitor: int = 1,
     if capture == "region":
         return ScreenGrabber(region=region)
     return ScreenGrabber(monitor=monitor)
+
+
+SEAT_MARKER_COLOR = (255, 0, 255)
+
+
+def mark_seat(img: Image.Image, seat: tuple[float, float] | list[float]) -> Image.Image:
+    """Copy of `img` with a magenta "YOU" ring at `seat` (fractions of width and height).
+
+    Drawing the player's seat onto the screenshot is the most reliable way to tell the
+    vision model which hand is the player's at a table with several seats.
+    """
+    out = img.convert("RGB").copy()
+    w, h = out.size
+    x, y = seat[0] * w, seat[1] * h
+    # Big enough to go around a seat's cards rather than across their corner indices.
+    r = max(24, int(min(w, h) * 0.12))
+    line = max(2, r // 18)
+    d = ImageDraw.Draw(out)
+    d.ellipse((x - r - 1, y - r - 1, x + r + 1, y + r + 1), outline=(0, 0, 0), width=line + 2)
+    d.ellipse((x - r, y - r, x + r, y + r), outline=SEAT_MARKER_COLOR, width=line)
+    size = max(12, r // 3)
+    try:
+        from PIL import ImageFont
+        font = ImageFont.load_default(size=size)
+    except TypeError:  # Pillow < 10.1 has no sized default font
+        font = None
+    label_y = y - r - line - size // 2 - 4
+    if label_y < size:  # no room above the ring: put the label below it
+        label_y = y + r + line + size // 2 + 4
+    d.text((x, label_y), "YOU", fill=SEAT_MARKER_COLOR, font=font, anchor="mm",
+           stroke_width=max(2, size // 6), stroke_fill=(0, 0, 0))
+    return out
 
 
 def to_png(img: Image.Image) -> bytes:

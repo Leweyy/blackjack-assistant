@@ -51,3 +51,10 @@ def test_capture_mode_migration_and_validation(monkeypatch):
 
     assert any("Choose a window" in p for p in config.validate(config.Settings(capture="window")))
     assert any("Select a table area" in p for p in config.validate(config.Settings(capture="region")))
+
+
+def test_seat_validation():
+    assert config.from_dict({"seat": [0.25, 0.8]}).seat == [0.25, 0.8]
+    assert config.from_dict({"seat": [0, 1]}).seat == [0, 1]
+    for bad in ([1.5, 0.2], [0.1], "x", [True, 0.5], [0.2, None]):
+        assert config.from_dict({"seat": bad}).seat is None

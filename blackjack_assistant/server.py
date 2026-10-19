@@ -31,6 +31,14 @@ class RequestError(Exception):
     """An error whose message is shown to the user as-is."""
 
 
+def png_data_url(img) -> str:
+    import base64
+    import io
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
 def advice_to_dict(a: Advice) -> dict:
     d = asdict(a)
     d["action"] = a.action.name if a.action else None
@@ -72,7 +80,7 @@ class Server:
         if handler is None:
             self.send({"id": req_id, "error": f"Unknown method: {method}"})
             return
-        slow = method in ("test_screenshot",)
+        slow = method in ("test_screenshot", "capture_preview")
 
         def run():
             try:
@@ -143,7 +151,7 @@ class Server:
 
         session = Session(api_key=s.effective_api_key(), model=s.model, rules=s.rules(), bets=s.bets(),
                           interval=s.interval, make_grabber=s.grabber,
-                          counting=s.counting, decks=s.decks, emit=emit, on_exit=on_exit)
+                          counting=s.counting, decks=s.decks, emit=emit, seat=s.seat, on_exit=on_exit)
         self._session = session
         session.start()
         return True
@@ -158,22 +166,36 @@ class Server:
             self._session.reset_count()
         return True
 
+    def rpc_capture_preview(self) -> dict:
+        """A snapshot of what's being watched, for marking the player's seat."""
+        from .capture import CaptureError
+
+        s = config.load(self._config_path)
+        try:
+            img = s.grabber().grab()  # created and used on this request's thread, as mss requires
+        except CaptureError as e:
+            raise RequestError(str(e)) from e
+        img.thumbnail((1280, 1280))
+        return {"image": png_data_url(img), "width": img.width, "height": img.height}
+
     def rpc_test_screenshot(self, path: str) -> dict:
         from PIL import Image, UnidentifiedImageError
 
-        from .capture import to_png
+        from .capture import mark_seat, to_png
 
         s = config.load(self._config_path)
         if not s.effective_api_key():
             raise RequestError("Add your Anthropic API key first.")
         try:
             with Image.open(path) as img:
-                png = to_png(img.convert("RGB"))
+                img = img.convert("RGB")
         except (OSError, UnidentifiedImageError) as e:
             raise RequestError(f"Couldn't open that image: {e}") from e
+        if s.seat:
+            img = mark_seat(img, s.seat)
         try:
             reader = TableReader(model=s.model, client=anthropic.Anthropic(api_key=s.effective_api_key()))
-            state = reader.read(png)
+            state = reader.read(to_png(img), seat_marked=bool(s.seat))
         except anthropic.AuthenticationError as e:
             raise RequestError("The API key was rejected.") from e
         except (VisionError, anthropic.APIError) as e:
@@ -182,7 +204,9 @@ class Server:
         if tracker:
             tracker.observe(state)
         a = advise(state, s.rules(), tracker.snapshot() if tracker else None, s.bets())
-        return {"advice": advice_to_dict(a), "table": state.model_dump()}
+        preview = img.copy()
+        preview.thumbnail((640, 640))
+        return {"advice": advice_to_dict(a), "table": state.model_dump(), "image": png_data_url(preview)}
 
 
 def enable_dpi_awareness() -> None:

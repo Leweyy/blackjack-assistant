@@ -9,7 +9,7 @@ from typing import Callable
 import anthropic
 
 from .advisor import Advice, BetSettings, advise
-from .capture import CaptureError, ChangeDetector, to_png
+from .capture import CaptureError, ChangeDetector, mark_seat, to_png
 from .counting import HiLoCounter, RoundTracker
 from .strategy import Rules
 from .vision import TableReader, VisionError
@@ -18,7 +18,8 @@ Emit = Callable[["Advice | str"], None]
 
 
 def watch_loop(grabber, reader, rules, interval, emit: Emit, stop: threading.Event,
-               tracker: RoundTracker | None = None, bets: BetSettings = BetSettings()):
+               tracker: RoundTracker | None = None, bets: BetSettings = BetSettings(),
+               seat: list[float] | None = None):
     detector = ChangeDetector()
     last_key = None
     while not stop.is_set():
@@ -27,7 +28,9 @@ def watch_loop(grabber, reader, rules, interval, emit: Emit, stop: threading.Eve
             img = grabber.grab()
             if detector.changed(img):
                 emit("Reading table…")
-                state = reader.read(to_png(img))
+                if seat:
+                    img = mark_seat(img, seat)
+                state = reader.read(to_png(img), seat_marked=bool(seat))
                 count = None
                 if tracker:
                     tracker.observe(state)
@@ -53,21 +56,21 @@ class Session:
 
     def __init__(self, *, api_key: str | None, model: str, rules: Rules, bets: BetSettings, interval: float,
                  make_grabber: Callable[[], object], counting: bool = True, decks: int = 8, emit: Emit,
-                 on_exit: Callable[[], None] | None = None):
+                 seat: list[float] | None = None, on_exit: Callable[[], None] | None = None):
         self.reader = TableReader(model=model, client=anthropic.Anthropic(api_key=api_key or None))
         self.tracker = RoundTracker(HiLoCounter(decks=decks)) if counting else None
-        self._args = (make_grabber, rules, interval, emit, bets)
+        self._args = (make_grabber, rules, interval, emit, bets, seat)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._on_exit = on_exit
 
     def start(self) -> None:
-        make_grabber, rules, interval, emit, bets = self._args
+        make_grabber, rules, interval, emit, bets, seat = self._args
 
         def run():
             try:
                 grabber = make_grabber()  # mss handles are per-thread, so create it here
-                watch_loop(grabber, self.reader, rules, interval, emit, self._stop, self.tracker, bets)
+                watch_loop(grabber, self.reader, rules, interval, emit, self._stop, self.tracker, bets, seat)
             except Exception as e:  # noqa: BLE001 - e.g. screen capture failing; report, don't die silently
                 emit(f"Error: {e}")
             finally:

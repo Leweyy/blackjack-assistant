@@ -33,6 +33,7 @@ class Settings:
     capture: str = "monitor"  # what to watch: "monitor", "region" or "window"
     region: list[int] | None = None  # [left, top, width, height], used when capture == "region"
     window: dict | None = None  # {"handle": int, "title": str}, used when capture == "window"
+    seat: list[float] | None = None  # player's seat as [x, y] fractions of the captured image; None = auto
     dealer_hits_soft_17: bool = False
     double_after_split: bool = True
     surrender_allowed: bool = True
@@ -87,6 +88,9 @@ def from_dict(data) -> Settings:
     if s.window is not None and not (isinstance(s.window, dict) and isinstance(s.window.get("handle"), int)
                                      and isinstance(s.window.get("title"), str)):
         s.window = None
+    if s.seat is not None and not (isinstance(s.seat, list) and len(s.seat) == 2 and all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 1 for v in s.seat)):
+        s.seat = None
     if "capture" not in data:  # settings saved before window capture existed
         s.capture = "region" if s.region else "monitor"
     if s.capture not in CAPTURE_MODES:

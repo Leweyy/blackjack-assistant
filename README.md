@@ -35,7 +35,14 @@ There's no auto-update yet. To update, download the new version from Releases.
      every card can be counted.
    - **Whole monitor:** simplest option, but costs more and is less accurate.
 
-   The advice overlay is hidden from screen captures, so it can sit on top of the game.
+   The assistant's own windows are hidden from screen captures, so they can sit on top
+   of the game.
+
+   **Your seat:** at a table with several players, click **Mark my seat** and click on
+   your cards in the snapshot. A magenta "YOU" ring is then drawn at that spot on every
+   screenshot, and only the cards there are used for advice. Other players' cards still
+   count towards the card count. Without a marked seat it tries to work out your seat
+   itself, and reports no hand rather than guessing when it can't tell.
 5. Press **Start**. The advice window appears in the top-right corner. Drag it anywhere.
    - **↺ New shoe** (or **R**) resets the count if a shuffle wasn't detected.
    - **✕** (or **Esc**) stops watching.

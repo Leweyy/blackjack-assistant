@@ -84,3 +84,42 @@ def test_errors(grabber):
 def test_make_grabber_requires_window():
     with pytest.raises(CaptureError, match="No window chosen"):
         make_grabber("window", window=None)
+
+
+def test_mark_seat_draws_ring_at_point():
+    from PIL import Image
+
+    from blackjack_assistant.capture import SEAT_MARKER_COLOR, mark_seat
+
+    img = Image.new("RGB", (1000, 600), (10, 90, 40))
+    out = mark_seat(img, [0.5, 0.75])
+    assert img.getpixel((500, 450)) == (10, 90, 40)  # original untouched
+    r = int(600 * 0.12)
+    ring = [out.getpixel((500 + dx, 450)) for dx in range(r - 6, r + 6)]
+    assert SEAT_MARKER_COLOR in ring
+    assert out.getpixel((500, 450)) == (10, 90, 40)  # centre left clear so cards stay visible
+
+
+def test_watch_loop_marks_seat_for_reader():
+    import threading
+
+    from PIL import Image
+
+    from blackjack_assistant.engine import watch_loop
+    from blackjack_assistant.strategy import Rules
+
+    stop = threading.Event()
+    calls = []
+
+    class Grabber:
+        def grab(self):
+            return Image.new("RGB", (400, 300), "green")
+
+    class Reader:
+        def read(self, png, seat_marked=False):
+            calls.append(seat_marked)
+            stop.set()
+            raise capture.CaptureError("stop here")
+
+    watch_loop(Grabber(), Reader(), Rules(), 0.01, lambda _x: None, stop, seat=[0.5, 0.5])
+    assert calls == [True]

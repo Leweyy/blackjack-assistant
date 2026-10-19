@@ -16,11 +16,16 @@ Rules:
 - Report card ranks only: A, 2-10, J, Q, K. Ignore suits.
 - The dealer normally shows one face-up card (the upcard) and one face-down card. \
 Report only the face-up card(s).
-- Report the player's hand(s). If the player has split, list each hand separately \
-and say which one is currently being played. "The player" is the person whose screen \
-this is (their seat/hand is usually highlighted, at the bottom, or labelled with their \
-balance or "You"). If everyone at the table shares one hand (e.g. Infinite Blackjack), \
-that shared hand is the player's hand.
+- player_hands is ONLY the hand(s) of "the player": the person whose screen this is. \
+Never put another seat's cards in player_hands. If the player has split, list each of \
+their hands separately and say which one is currently being played.
+- Finding the player's seat: in live-dealer games there are several seats. The player's \
+own seat is usually highlighted or outlined, shows their bet chips and hand total in a \
+larger bubble, or is labelled "You", with their name or with their balance. When the \
+decision buttons are showing, the hand the game is asking about is the player's. If \
+everyone shares one hand (e.g. Infinite Blackjack), that shared hand is the player's.
+- If you cannot tell which seat is the player's, leave player_hands empty and set \
+confident to false. Do not guess, because the advice would be for someone else's hand.
 - Report every other face-up card on the table (other seats/players) in \
 other_players_cards. Include each physical card once. This is used for card counting, \
 so be complete and do not double-list cards already in dealer_cards or player_hands.
@@ -40,6 +45,11 @@ results/payouts are shown, with the cards still on the table.
 or even money.
 - If no blackjack table is visible, set table_visible to false.
 - Never guess a card you cannot read; set confident to false instead."""
+
+SEAT_MARKER_NOTE = """The player's seat has been marked on this screenshot with a bright \
+magenta ring labelled "YOU". That is the player's seat for certain: player_hands must \
+contain only the cards at or right next to that ring (including split hands there). \
+Every other seat's cards go in other_players_cards. The ring itself is not part of the game."""
 
 
 class TableState(BaseModel):
@@ -68,7 +78,7 @@ class TableReader:
         self.model = model
         self.client = client or anthropic.Anthropic()
 
-    def read(self, png_bytes: bytes) -> TableState:
+    def read(self, png_bytes: bytes, seat_marked: bool = False) -> TableState:
         image_b64 = base64.standard_b64encode(png_bytes).decode("ascii")
         response = self.client.beta.messages.parse(
             model=self.model,
@@ -82,7 +92,8 @@ class TableReader:
                 "role": "user",
                 "content": [
                     {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": image_b64}},
-                    {"type": "text", "text": "Read the current blackjack table state."},
+                    {"type": "text", "text": (SEAT_MARKER_NOTE + "\n\n" if seat_marked else "")
+                     + "Read the current blackjack table state."},
                 ],
             }],
             output_format=TableState,

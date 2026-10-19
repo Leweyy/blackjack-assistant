@@ -28,6 +28,8 @@ export interface Settings {
   capture: CaptureMode;
   region: Region | null;
   window: ChosenWindow | null;
+  /** The player's seat as [x, y] fractions of the captured image; null = detect automatically. */
+  seat: [number, number] | null;
   dealer_hits_soft_17: boolean;
   double_after_split: boolean;
   surrender_allowed: boolean;
@@ -67,6 +69,13 @@ export interface TableState {
 export interface ScreenshotResult {
   advice: Advice;
   table: TableState;
+  image: string; // data: URL of the image as sent to Claude (with the seat marker)
+}
+
+export interface CapturePreview {
+  image: string; // data: URL
+  width: number;
+  height: number;
 }
 
 export type BackendEvent =
@@ -87,6 +96,7 @@ export interface Api {
   isRunning(): Promise<boolean>;
   pickRegion(): Promise<Region | null>;
   listWindows(): Promise<WindowSource[]>;
+  capturePreview(): Promise<CapturePreview>;
   platform: string;
   openImage(): Promise<string | null>;
   openExternal(url: string): Promise<void>;

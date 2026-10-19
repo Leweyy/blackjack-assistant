@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Advice, CaptureMode, ChosenWindow, Region, ScreenshotResult, Settings, SettingsInfo } from "../../shared/types";
+import type { Advice, CaptureMode, ChosenWindow, Region, ScreenshotResult, Seat, Settings, SettingsInfo } from "../../shared/types";
 import { adviceColor, errorMessage } from "../common";
 import { Card, icons, Row, Stepper, ToggleRow } from "./components";
-import { SeatMarker } from "./SeatMarker";
 import { WindowChooser } from "./WindowChooser";
 
 type Page = "rules" | "counting" | "screen" | "connection";
@@ -15,9 +14,9 @@ const PAGES: { id: Page; label: string }[] = [
 ];
 
 const MODELS = [
-  { id: "claude-opus-5-5", name: "Claude Opus 5.5", hint: "Most accurate card reading", tag: "Recommended" },
-  { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", hint: "Good accuracy, about half the cost", tag: "Balanced" },
-  { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", hint: "Far cheaper, may misread cards more often", tag: "Cheapest" },
+  { id: "claude-opus-5-5", name: "Claude Opus 5.5", hint: "Most accurate card reading, but the slowest", tag: "Most accurate" },
+  { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", hint: "Quicker answers with thinking turned off, about half the cost", tag: "Faster" },
+  { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", hint: "Quickest and far cheaper, may misread cards more often", tag: "Fastest" },
 ];
 
 /** Settings as edited in the form: numbers stay as text until saved. */
@@ -25,11 +24,12 @@ interface Form {
   api_key: string;
   model: string;
   interval: string;
+  fast_reads: boolean;
   monitor: string;
   capture: CaptureMode;
   region: Region | null;
   window: ChosenWindow | null;
-  seat: [number, number] | null;
+  seat: Seat | null;
   dealer_hits_soft_17: boolean;
   double_after_split: boolean;
   surrender_allowed: boolean;
@@ -70,7 +70,7 @@ function fromForm(f: Form): { settings?: Settings; invalid: Invalid } {
   return {
     invalid,
     settings: {
-      api_key: f.api_key.trim(), model: f.model.trim() || MODELS[0].id, interval, monitor,
+      api_key: f.api_key.trim(), model: f.model.trim() || MODELS[0].id, interval, fast_reads: f.fast_reads, monitor,
       capture: f.capture, region: f.region, window: f.window, seat: f.seat,
       dealer_hits_soft_17: f.dealer_hits_soft_17, double_after_split: f.double_after_split,
       surrender_allowed: f.surrender_allowed, counting: f.counting, decks, unit, max_units: maxUnits,
@@ -112,6 +112,7 @@ export default function App() {
     const offEvent = window.api.onEvent((e) => {
       if (e.event === "status") setStatus(e.data);
       else if (e.event === "error") setError(e.data);
+      else if (e.event === "seat") setForm((f) => (f ? { ...f, seat: e.data } : f));
       else if (e.event === "advice") {
         setLastAdvice(e.data);
         setError(null);
@@ -307,8 +308,18 @@ const CAPTURE_OPTIONS: { id: CaptureMode; label: string; hint: string }[] = [
 function ScreenPage({ form, update, invalid }: PageProps & { invalid: Invalid }) {
   const [picking, setPicking] = useState(false);
   const [choosing, setChoosing] = useState(false);
-  const [markingSeat, setMarkingSeat] = useState(false);
+  const [seatError, setSeatError] = useState<string | null>(null);
   const windowsSupported = window.api.platform === "win32";
+
+  async function markSeat() {
+    setSeatError(null);
+    try {
+      // Saved by the backend and echoed back as a "seat" event, which updates the form.
+      await window.api.markSeat();
+    } catch (e) {
+      setSeatError(errorMessage(e));
+    }
+  }
 
   async function pick() {
     setPicking(true);
@@ -379,11 +390,12 @@ function ScreenPage({ form, update, invalid }: PageProps & { invalid: Invalid })
       <Card>
         <Row title="Your seat"
           hint={form.seat
-            ? "Marked. A “YOU” ring is drawn at your seat on every screenshot so only your cards are used for advice. Mark it again if the table layout changes."
-            : "Detected automatically. If the advice follows another player’s hand, mark your seat so the assistant knows which cards are yours."}>
+            ? "Marked. A “YOU” box is drawn around your seat on every screenshot and only cards inside it are used for advice. You can also mark it from the advice window while playing."
+            : "Detected automatically. If the advice follows another player’s hand, drag a box around just your cards (with room for extra cards) on top of the game."}>
           {form.seat && <button className="btn" onClick={() => update("seat", null)}>Detect automatically</button>}
-          <button className="btn primary" onClick={() => setMarkingSeat(true)}>{form.seat ? "Mark again" : "Mark my seat"}</button>
+          <button className="btn primary" onClick={markSeat}>{form.seat ? "Mark again" : "Mark my seat"}</button>
         </Row>
+        {seatError && <div className="result" style={{ color: "#ff8f88" }}>{seatError}</div>}
       </Card>
       <Card>
         <Row title="Check every" hint="Each check of a live video feed is one API call. 3 seconds roughly halves the cost of 1.5; counting still works because rounds are counted when they finish.">
@@ -392,14 +404,9 @@ function ScreenPage({ form, update, invalid }: PageProps & { invalid: Invalid })
           </span>
           <span className="suffix">seconds</span>
         </Row>
+        <ToggleRow title="Faster updates" checked={form.fast_reads} onChange={(v) => update("fast_reads", v)}
+          hint="Sends the next screenshot while the previous one is still being read, so advice arrives sooner. Uses up to about twice as many API calls." />
       </Card>
-      {markingSeat && (
-        <SeatMarker
-          initial={form.seat}
-          onSave={(seat) => { update("seat", seat); setMarkingSeat(false); }}
-          onClose={() => setMarkingSeat(false)}
-        />
-      )}
       {choosing && (
         <WindowChooser
           selected={form.window?.handle ?? null}

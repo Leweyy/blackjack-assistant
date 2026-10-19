@@ -4,6 +4,8 @@ import "../styles.css";
 
 interface Point { x: number; y: number }
 
+const seatMode = new URLSearchParams(window.location.search).get("mode") === "seat";
+
 function Picker() {
   const [start, setStart] = useState<Point | null>(null);
   const [end, setEnd] = useState<Point | null>(null);
@@ -21,7 +23,7 @@ function Picker() {
 
   return (
     <div
-      className={`picker ${rect ? "selecting" : ""}`}
+      className={`picker ${rect ? "selecting" : ""} ${seatMode ? "seat" : ""}`}
       onContextMenu={(e) => { e.preventDefault(); window.api.pickerDone(null); }}
       onMouseDown={(e) => { if (e.button === 0) { setStart({ x: e.clientX, y: e.clientY }); setEnd({ x: e.clientX, y: e.clientY }); } }}
       onMouseMove={(e) => start && setEnd({ x: e.clientX, y: e.clientY })}
@@ -39,7 +41,11 @@ function Picker() {
           </div>
         </>
       )}
-      <div className="hint">Drag a box around the blackjack table · Esc to cancel</div>
+      <div className="hint">
+        {seatMode
+          ? <>Drag a box around <b>your</b> cards only, leaving room for extra cards · Esc to cancel</>
+          : <>Drag a box around the blackjack table · Esc to cancel</>}
+      </div>
     </div>
   );
 }

@@ -10,7 +10,7 @@ const api: Api = {
   isRunning: () => ipcRenderer.invoke("session:running"),
   pickRegion: () => ipcRenderer.invoke("region:pick"),
   listWindows: () => ipcRenderer.invoke("windows:list"),
-  capturePreview: () => ipcRenderer.invoke("capture:preview"),
+  markSeat: () => ipcRenderer.invoke("seat:mark"),
   platform: process.platform,
   openImage: () => ipcRenderer.invoke("dialog:openImage"),
   openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),

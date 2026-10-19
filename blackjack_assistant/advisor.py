@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .counting import CountSnapshot, bet_advice
-from .strategy import Action, Rules, recommend, should_take_insurance
+from .strategy import Action, Rules, hand_total, recommend, should_take_insurance
 from .vision import TableState
 
 
@@ -22,6 +22,12 @@ class Advice:
     action: Action | None   # None when there's no playing decision
     count_line: str = ""    # e.g. "RC +6  ·  TC +1.5  ·  4.0 decks left  ·  edge +0.3%"
     bet_units: int | None = None  # set during the betting phase
+    reason: str = ""        # short explanation, e.g. "Hard 11 vs 6"
+    player_cards: list[str] = field(default_factory=list)  # the hand being played, e.g. ["9♥", "5♠"]
+    dealer_cards: list[str] = field(default_factory=list)
+    player_total: str = ""  # e.g. "14" or "soft 18"
+    dealer_total: str = ""
+    hand_label: str = ""    # e.g. "hand 2 of 2" after a split
 
 
 def format_count(c: CountSnapshot) -> str:
@@ -29,25 +35,44 @@ def format_count(c: CountSnapshot) -> str:
             f"{c.decks_remaining:.1f} decks left  ·  edge {c.edge_percent:+.1f}%")
 
 
+def _total(cards: list[str]) -> str:
+    if not cards:
+        return ""
+    try:
+        total, soft = hand_total(cards)
+    except ValueError:
+        return ""
+    return f"soft {total}" if soft and total < 21 else str(total)
+
+
 def advise(state: TableState, rules: Rules, count: CountSnapshot | None = None,
            bets: BetSettings = BetSettings()) -> Advice:
     count_line = format_count(count) if count else ""
     tc = count.true_count if count else None
 
-    def out(headline, detail, action=None, bet_units=None) -> Advice:
-        return Advice(headline, detail, action, count_line, bet_units)
+    idx = min(max(state.active_hand_index, 0), len(state.player_hands) - 1) if state.player_hands else 0
+    hand = state.player_hands[idx] if state.player_hands else []
+    table = {
+        "player_cards": list(hand), "dealer_cards": list(state.dealer_cards),
+        "player_total": _total(hand), "dealer_total": _total(state.dealer_cards),
+        "hand_label": f"hand {idx + 1} of {len(state.player_hands)}" if len(state.player_hands) > 1 else "",
+    }
+
+    def out(headline, detail, action=None, bet_units=None, reason="", show_table=True) -> Advice:
+        return Advice(headline, detail, action, count_line, bet_units, reason or detail,
+                      **(table if show_table else {}))
 
     if not state.table_visible:
-        return out("No table", "Couldn't find a blackjack table on screen")
+        return out("No table", "Couldn't find a blackjack table on screen", show_table=False)
     if state.shuffle_detected:
-        return out("Shuffle", "New shoe: count reset to 0")
+        return out("Shuffle", "New shoe: count reset to 0", show_table=False)
 
     if state.is_betting_phase or not state.player_hands:
         if count:
             b = bet_advice(count.true_count, bets.max_units, bets.unit)
             money = f" ({b.amount:g})" if b.amount is not None else ""
             return out(b.headline, f"Place {b.units} unit{'s' if b.units != 1 else ''}{money} "
-                                   f"at TC {count.true_count:+.1f}", bet_units=b.units)
+                                   f"at TC {count.true_count:+.1f}", bet_units=b.units, show_table=False)
         return out("Waiting…", "Waiting for cards to be dealt")
     if not state.dealer_cards:
         return out("Waiting…", "Waiting for cards to be dealt")
@@ -60,8 +85,6 @@ def advise(state: TableState, rules: Rules, count: CountSnapshot | None = None,
             return out("TAKE INSURANCE", f"TC {tc:+.1f} ≥ +3: insurance is profitable", Action.INSURANCE)
         return out("NO INSURANCE", f"TC {tc:+.1f} < +3: insurance loses money", Action.NO_INSURANCE)
 
-    idx = min(max(state.active_hand_index, 0), len(state.player_hands) - 1)
-    hand = state.player_hands[idx]
     if len(hand) < 2:
         return out("Waiting…", "Waiting for your second card")
 
@@ -78,8 +101,11 @@ def advise(state: TableState, rules: Rules, count: CountSnapshot | None = None,
 
     hand_label = f" (hand {idx + 1}/{len(state.player_hands)})" if len(state.player_hands) > 1 else ""
     detail = f"{r.reason}  ·  You: {' '.join(hand)}{hand_label}  ·  Dealer: {up}"
+    reason = r.reason
     if not state.confident:
         detail += "  ·  ⚠ low confidence, double-check cards"
+        reason += "  ·  ⚠ low confidence, check the cards"
     if state.round_complete or not state.is_player_turn:
-        return out("Waiting…", "Not your turn  ·  " + detail)
-    return out(r.action.value, detail, r.action)
+        return out("Waiting…", "Not your turn  ·  " + detail,
+                   reason="Round over" if state.round_complete else "Waiting for your turn")
+    return out(r.action.value, detail, r.action, reason=reason)

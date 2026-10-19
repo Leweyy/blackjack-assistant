@@ -29,11 +29,12 @@ class Settings:
     api_key: str = ""
     model: str = DEFAULT_MODEL
     interval: float = 1.5
+    fast_reads: bool = True  # overlap up to two reads: advice sooner, up to ~2x the API calls
     monitor: int = 1
     capture: str = "monitor"  # what to watch: "monitor", "region" or "window"
     region: list[int] | None = None  # [left, top, width, height], used when capture == "region"
     window: dict | None = None  # {"handle": int, "title": str}, used when capture == "window"
-    seat: list[float] | None = None  # player's seat as [x, y] fractions of the captured image; None = auto
+    seat: list[float] | None = None  # player's seat box [x, y, w, h] as fractions of the captured image; None = auto
     dealer_hits_soft_17: bool = False
     double_after_split: bool = True
     surrender_allowed: bool = True
@@ -63,6 +64,27 @@ class Settings:
 CAPTURE_MODES = ("monitor", "region", "window")
 
 
+def clean_seat(seat) -> list[float] | None:
+    """A valid [x, y, w, h] seat box (fractions of the image), or None.
+
+    Seats saved by 0.4.0 were a single point [x, y]; they become a small box around it.
+    """
+    if not isinstance(seat, list) or not all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) for v in seat):
+        return None
+    if len(seat) == 2:
+        x, y = seat
+        seat = [x - 0.06, y - 0.08, 0.12, 0.16]
+    if len(seat) != 4:
+        return None
+    x, y, w, h = seat
+    x0, y0 = max(0.0, x), max(0.0, y)
+    x1, y1 = min(1.0, x + w), min(1.0, y + h)
+    if x1 - x0 < 0.01 or y1 - y0 < 0.01:
+        return None
+    return [round(x0, 4), round(y0, 4), round(x1 - x0, 4), round(y1 - y0, 4)]
+
+
 def from_dict(data) -> Settings:
     """Build Settings from a dict; missing, unknown or wrongly-typed entries fall back to defaults."""
     if not isinstance(data, dict):
@@ -88,9 +110,7 @@ def from_dict(data) -> Settings:
     if s.window is not None and not (isinstance(s.window, dict) and isinstance(s.window.get("handle"), int)
                                      and isinstance(s.window.get("title"), str)):
         s.window = None
-    if s.seat is not None and not (isinstance(s.seat, list) and len(s.seat) == 2 and all(
-            isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 1 for v in s.seat)):
-        s.seat = None
+    s.seat = clean_seat(s.seat)
     if "capture" not in data:  # settings saved before window capture existed
         s.capture = "region" if s.region else "monitor"
     if s.capture not in CAPTURE_MODES:

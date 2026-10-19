@@ -3,7 +3,7 @@
 import path from "node:path";
 import { app, BrowserWindow, desktopCapturer, Display, dialog, ipcMain, Rectangle, screen, shell } from "electron";
 import { Backend } from "./backend";
-import type { BackendEvent, Region, RendererMethod, WindowSource } from "../shared/types";
+import type { BackendEvent, PickMode, Region, RendererMethod, Seat, WindowSource } from "../shared/types";
 
 const RENDERER_METHODS: RendererMethod[] = ["get_settings", "save_settings", "test_screenshot", "reset_count"];
 const BG = "#0e1116";
@@ -124,19 +124,24 @@ function toCapturePixels(rect: Rectangle, display: Display, win: BrowserWindow):
 
 let pickerInProgress: Promise<Region | null> | null = null;
 
-function pickRegion(): Promise<Region | null> {
+/** Let the user drag a box on screen. Returns it in capture pixels, or null if cancelled. */
+function pickRegion(mode: PickMode = "region"): Promise<Region | null> {
   if (pickerInProgress) return pickerInProgress;
   pickerInProgress = new Promise<Region | null>((resolve) => {
     const pickers: { win: BrowserWindow; display: Display }[] = [];
     let finished = false;
+    const overlayWasVisible = !!overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible();
     mainWindow?.hide();
+    overlayWindow?.hide();
 
     const finish = (region: Region | null) => {
       if (finished) return;
       finished = true;
       ipcMain.removeListener("picker:done", onDone);
       for (const p of pickers) if (!p.win.isDestroyed()) p.win.close();
-      mainWindow?.show();
+      if (overlayWasVisible) overlayWindow?.showInactive();
+      // Marking a seat from the overlay shouldn't pop the settings window up mid-game.
+      if (mode === "region" || !overlayWasVisible) mainWindow?.show();
       pickerInProgress = null;
       resolve(region);
     };
@@ -170,12 +175,33 @@ function pickRegion(): Promise<Region | null> {
       win.on("closed", () => {
         if (!finished) finish(null);
       });
-      win.loadFile(page("picker"));
+      win.loadFile(page("picker"), { query: { mode } });
       pickers.push({ win, display });
     }
     pickers.find((p) => p.display.id === screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id)?.win.focus();
   });
   return pickerInProgress;
+}
+
+/**
+ * Let the user drag a box around their own cards, on top of the live game, and save it
+ * as the seat: a box in fractions of the captured image. Works while running, too.
+ */
+async function markSeat(): Promise<Seat | null> {
+  const [left, top, width, height] = await backend.request<Region>("capture_bounds");
+  const box = await pickRegion("seat");
+  if (!box) return null;
+  const [bx, by, bw, bh] = box;
+  const x0 = Math.max(bx, left), y0 = Math.max(by, top);
+  const x1 = Math.min(bx + bw, left + width), y1 = Math.min(by + bh, top + height);
+  if (x1 - x0 < 10 || y1 - y0 < 10) {
+    throw new Error("That box is outside the area being watched. Draw it over your cards in the game.");
+  }
+  const seat = await backend.request<Seat>("set_seat", {
+    seat: [(x0 - left) / width, (y0 - top) / height, (x1 - x0) / width, (y1 - y0) / height],
+  });
+  broadcast("backend:event", { event: "seat", data: seat });
+  return seat;
 }
 
 // ---- window picker --------------------------------------------------------
@@ -215,19 +241,9 @@ function registerIpc(): void {
     await backend.request("stop");
   });
   ipcMain.handle("session:running", () => running);
-  ipcMain.handle("region:pick", () => pickRegion());
+  ipcMain.handle("region:pick", () => pickRegion("region"));
+  ipcMain.handle("seat:mark", () => markSeat());
   ipcMain.handle("windows:list", () => listWindows());
-  ipcMain.handle("capture:preview", async () => {
-    // Get the settings window out of the way so the snapshot shows the table, not this app.
-    mainWindow?.hide();
-    await new Promise((r) => setTimeout(r, 350));
-    try {
-      return await backend.request("capture_preview");
-    } finally {
-      mainWindow?.show();
-      mainWindow?.focus();
-    }
-  });
   ipcMain.handle("dialog:openImage", async () => {
     const options: Electron.OpenDialogOptions = {
       title: "Choose a screenshot of your blackjack game",

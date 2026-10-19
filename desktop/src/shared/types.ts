@@ -5,6 +5,12 @@ export type Region = [left: number, top: number, width: number, height: number];
 
 export type CaptureMode = "monitor" | "region" | "window";
 
+/** A box around the player's cards: [x, y, width, height] as fractions of the captured image. */
+export type Seat = [x: number, y: number, width: number, height: number];
+
+/** What the on-screen box picker is for. */
+export type PickMode = "region" | "seat";
+
 /** A window the user picked to watch. `handle` is the Windows HWND. */
 export interface ChosenWindow {
   handle: number;
@@ -24,12 +30,13 @@ export interface Settings {
   api_key: string;
   model: string;
   interval: number;
+  fast_reads: boolean;
   monitor: number;
   capture: CaptureMode;
   region: Region | null;
   window: ChosenWindow | null;
-  /** The player's seat as [x, y] fractions of the captured image; null = detect automatically. */
-  seat: [number, number] | null;
+  /** The player's seat box as fractions of the captured image; null = detect automatically. */
+  seat: Seat | null;
   dealer_hits_soft_17: boolean;
   double_after_split: boolean;
   surrender_allowed: boolean;
@@ -53,6 +60,12 @@ export interface Advice {
   action: ActionName | null;
   count_line: string;
   bet_units: number | null;
+  reason: string;
+  player_cards: string[];
+  dealer_cards: string[];
+  player_total: string;
+  dealer_total: string;
+  hand_label: string;
 }
 
 export interface TableState {
@@ -72,11 +85,6 @@ export interface ScreenshotResult {
   image: string; // data: URL of the image as sent to Claude (with the seat marker)
 }
 
-export interface CapturePreview {
-  image: string; // data: URL
-  width: number;
-  height: number;
-}
 
 export type BackendEvent =
   | { event: "ready"; data: null }
@@ -84,6 +92,7 @@ export type BackendEvent =
   | { event: "status"; data: string }
   | { event: "error"; data: string }
   | { event: "stopped"; data: null }
+  | { event: "seat"; data: Seat | null }
   | { event: "backend-exit"; data: { code: number | null } };
 
 export type RendererMethod = "get_settings" | "save_settings" | "test_screenshot" | "reset_count";
@@ -96,7 +105,8 @@ export interface Api {
   isRunning(): Promise<boolean>;
   pickRegion(): Promise<Region | null>;
   listWindows(): Promise<WindowSource[]>;
-  capturePreview(): Promise<CapturePreview>;
+  /** Drag a box around your cards on screen; saves and returns it (null if cancelled). */
+  markSeat(): Promise<Seat | null>;
   platform: string;
   openImage(): Promise<string | null>;
   openExternal(url: string): Promise<void>;

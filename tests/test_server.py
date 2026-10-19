@@ -56,3 +56,23 @@ def test_stop_and_reset_without_session(tmp_path):
     s, out = make_server(tmp_path)
     assert call(s, out, "stop")[0]["result"] is True
     assert call(s, out, "reset_count")[0]["result"] is True
+
+
+def test_set_seat_saves_and_validates(tmp_path):
+    s, out = make_server(tmp_path)
+    assert call(s, out, "set_seat", seat=[0.3, 0.6, 0.1, 0.15])[0]["result"] == [0.3, 0.6, 0.1, 0.15]
+    assert config.load(s._config_path).seat == [0.3, 0.6, 0.1, 0.15]
+    assert "too small" in call(s, out, "set_seat", seat=[0.3, 0.6, 0.0, 0.15])[0]["error"]
+    assert call(s, out, "set_seat", seat=None)[0]["result"] is None
+    assert config.load(s._config_path).seat is None
+
+
+def test_model_options_per_model():
+    from blackjack_assistant.vision import model_options
+
+    opus = model_options("claude-opus-5-5")
+    assert "thinking" not in opus and opus["fallbacks"] == "default" and opus["output_config"] == {"effort": "low"}
+    sonnet = model_options("claude-sonnet-5-5")
+    assert sonnet["thinking"] == {"type": "between_tools"} and sonnet["fallbacks"] == "default"
+    haiku = model_options("claude-haiku-5-5")
+    assert haiku["thinking"] == {"type": "disabled"} and "fallbacks" not in haiku and "betas" not in haiku

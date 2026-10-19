@@ -1,11 +1,42 @@
 import { StrictMode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Advice } from "../../shared/types";
-import { adviceColor } from "../common";
+import { adviceColor, errorMessage } from "../common";
 import "../styles.css";
 
+const STARTING: Advice = {
+  headline: "Starting…", detail: "", action: null, count_line: "", bet_units: null, reason: "",
+  player_cards: [], dealer_cards: [], player_total: "", dealer_total: "", hand_label: "",
+};
+
+const SUITS = "♠♥♦♣";
+
+/** "9♥" -> a small card showing ♥9; cards read without a suit show the rank alone. */
+function CardChip({ card }: { card: string }) {
+  const text = card.trim();
+  const suit = SUITS.includes(text.slice(-1)) ? text.slice(-1) : "";
+  const rank = suit ? text.slice(0, -1).trim() : text;
+  const red = suit === "♥" || suit === "♦";
+  return (
+    <span className={`card-chip ${red ? "red" : ""}`} aria-label={card}>
+      {suit && <span className="suit">{suit}</span>}
+      <span className="rank">{rank}</span>
+    </span>
+  );
+}
+
+function HandRow({ label, note, cards, total }: { label: string; note?: string; cards: string[]; total: string }) {
+  return (
+    <div className="hand-row">
+      <div className="hand-label">{label}{note && <small>{note}</small>}</div>
+      <div className="hand-cards">{cards.map((c, i) => <CardChip key={`${c}-${i}`} card={c} />)}</div>
+      {total && <div className="hand-total">{total}</div>}
+    </div>
+  );
+}
+
 function Overlay() {
-  const [advice, setAdvice] = useState<Advice>({ headline: "Starting…", detail: "", action: null, count_line: "", bet_units: null });
+  const [advice, setAdvice] = useState<Advice>(STARTING);
   const [status, setStatus] = useState("Watching your screen…");
   const [error, setError] = useState(false);
   const [pulse, setPulse] = useState(0);
@@ -49,18 +80,43 @@ function Overlay() {
     setError(false);
   }
 
+  async function markSeat() {
+    try {
+      const seat = await window.api.markSeat();
+      if (seat) {
+        setStatus("Seat marked ✓");
+        setError(false);
+      }
+    } catch (e) {
+      setStatus(errorMessage(e));
+      setError(true);
+    }
+  }
+
+  const showHands = advice.player_cards.length > 0 || advice.dealer_cards.length > 0;
   return (
     <div className="overlay" ref={cardRef}>
       <div key={pulse} className={`headline ${pulse ? "pulse" : ""}`} style={{ background: adviceColor(advice.action, advice.bet_units) }}>
         {advice.headline}
       </div>
-      {advice.detail && <div className="detail">{advice.detail}</div>}
+      {advice.reason && <div className="reason">{advice.reason}</div>}
+      {showHands && (
+        <div className="hands">
+          {advice.player_cards.length > 0 && (
+            <HandRow label="You" note={advice.hand_label} cards={advice.player_cards} total={advice.player_total} />
+          )}
+          {advice.dealer_cards.length > 0 && (
+            <HandRow label="Dealer" cards={advice.dealer_cards} total={advice.dealer_total} />
+          )}
+        </div>
+      )}
       {advice.count_line && <div className="count">{advice.count_line}</div>}
-      <div className="footer">
+      <footer className="footer">
         <div className={`status ${error ? "error" : ""}`} title={status}>{status}</div>
-        {advice.count_line && <button className="icon-btn" title="Reset the count for a new shoe (R)" onClick={resetCount}>↺ New shoe</button>}
+        <button className="icon-btn" title="Drag a box around your cards so only they are used for advice" onClick={markSeat}>📍 Seat</button>
+        {advice.count_line && <button className="icon-btn" title="Reset the count for a new shoe (R)" onClick={resetCount}>↺ Shoe</button>}
         <button className="icon-btn" title="Stop (Esc)" onClick={() => window.api.closeOverlay()}>✕</button>
-      </div>
+      </footer>
     </div>
   );
 }

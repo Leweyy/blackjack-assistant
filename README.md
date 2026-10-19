@@ -38,13 +38,19 @@ There's no auto-update yet. To update, download the new version from Releases.
    The assistant's own windows are hidden from screen captures, so they can sit on top
    of the game.
 
-   **Your seat:** at a table with several players, click **Mark my seat** and click on
-   your cards in the snapshot. A magenta "YOU" ring is then drawn at that spot on every
-   screenshot, and only the cards there are used for advice. Other players' cards still
-   count towards the card count. Without a marked seat it tries to work out your seat
-   itself, and reports no hand rather than guessing when it can't tell.
+   **Your seat:** at a table with several players, click **Mark my seat** (or **📍 Seat**
+   in the advice window while playing) and drag a box around just your cards, on top of
+   the game. Leave room for extra cards but don't include the next seat. A magenta "YOU"
+   box is then drawn there on every screenshot, and only the cards inside it are used for
+   advice. Other players' cards still count towards the card count. Without a marked seat
+   it tries to work out your seat itself, and reports no hand rather than guessing when it
+   can't tell.
 5. Press **Start**. The advice window appears in the top-right corner. Drag it anywhere.
-   - **↺ New shoe** (or **R**) resets the count if a shuffle wasn't detected.
+   It shows the move, your hand and the dealer's as small cards (e.g. ♥9 ♠5 vs ♣10)
+   with their totals, and the count. The footer shows the status, including how long the
+   last read took, and has these buttons:
+   - **📍 Seat** marks your seat (see above).
+   - **↺ Shoe** (or **R**) resets the count if a shuffle wasn't detected.
    - **✕** (or **Esc**) stops watching.
 
 Settings save automatically to `%APPDATA%\BlackjackAssistant\settings.json`. The API key
@@ -95,11 +101,28 @@ there. Turn it off under Counting & bets.
 shoe. Compare its count with your own for the first few shoes. Burn cards and cards
 hidden by the video framing can't be counted.
 
+## Speed
+
+Each read is one round trip to Claude. To get advice inside your decision window:
+
+- Screenshots are sent as compact JPEGs, so the upload is quick.
+- **Faster updates** (on by default) sends the next screenshot while the previous one is
+  still being read, up to two at a time. A card dealt just after a screenshot then shows
+  up about one read later instead of two. Late answers that are older than what's already
+  shown are dropped.
+- Model choice matters most. **Claude Sonnet 5.5** and **Claude Haiku 5.5** run with
+  thinking turned off and answer noticeably faster than Opus, which always thinks a
+  little. Try Sonnet first: it reads cards well.
+- A smaller capture (a window or table area rather than the whole monitor) means less to
+  upload and read.
+
+The footer of the advice window shows how long each read took, so you can compare.
+
 ## Cost
 
 A live video feed changes almost every frame, so expect about **one API request per
-check** (40 per minute at the default 1.5 s). With Claude Opus 5.5 that can add up to
-tens of dollars per hour of play. To reduce it:
+check** (40 per minute at the default 1.5 s), up to about twice that with Faster updates.
+With Claude Opus 5.5 that can add up to tens of dollars per hour of play. To reduce it:
 
 - set **Check every** to 3 seconds (about half the cost; counting still works because
   rounds are counted when they finish)

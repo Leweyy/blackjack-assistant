@@ -44,13 +44,16 @@ class ScreenGrabber:
         self.monitor = monitor
         self._sct = _mss()
 
-    def grab(self) -> Image.Image:
+    def bounds(self) -> Region:
+        """The screen rectangle being captured, in capture (physical) pixels."""
         if self.region:
-            area = {"left": self.region.left, "top": self.region.top,
-                    "width": self.region.width, "height": self.region.height}
-        else:
-            area = self._sct.monitors[self.monitor]
-        shot = self._sct.grab(area)
+            return self.region
+        m = self._sct.monitors[self.monitor]
+        return Region(m["left"], m["top"], m["width"], m["height"])
+
+    def grab(self) -> Image.Image:
+        b = self.bounds()
+        shot = self._sct.grab({"left": b.left, "top": b.top, "width": b.width, "height": b.height})
         return Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
 
 
@@ -90,7 +93,8 @@ class WindowGrabber:
         self.handle = found
         return found
 
-    def grab(self) -> Image.Image:
+    def bounds(self) -> Region:
+        """Where the window currently is on screen (clipped to the screens), in capture pixels."""
         handle = self._resolve()
         if self.api.is_minimized(handle):
             raise CaptureError(f"The window “{self.title}” is minimised. Restore it so the table is visible.")
@@ -101,7 +105,11 @@ class WindowGrabber:
         bottom = min(r.top + r.height, screen["top"] + screen["height"])
         if right - left < 20 or bottom - top < 20:
             raise CaptureError(f"The window “{self.title}” is off-screen.")
-        shot = self._sct.grab({"left": left, "top": top, "width": right - left, "height": bottom - top})
+        return Region(left, top, right - left, bottom - top)
+
+    def grab(self) -> Image.Image:
+        b = self.bounds()
+        shot = self._sct.grab({"left": b.left, "top": b.top, "width": b.width, "height": b.height})
         return Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
 
 
@@ -120,40 +128,47 @@ def make_grabber(capture: str, region: Region | None = None, monitor: int = 1,
 SEAT_MARKER_COLOR = (255, 0, 255)
 
 
-def mark_seat(img: Image.Image, seat: tuple[float, float] | list[float]) -> Image.Image:
-    """Copy of `img` with a magenta "YOU" ring at `seat` (fractions of width and height).
+def mark_seat(img: Image.Image, seat: list[float] | tuple[float, ...]) -> Image.Image:
+    """Copy of `img` with a magenta box labelled "YOU" around the player's seat.
 
-    Drawing the player's seat onto the screenshot is the most reliable way to tell the
-    vision model which hand is the player's at a table with several seats.
+    `seat` is [x, y, width, height] as fractions of the image. Drawing the seat onto
+    the screenshot is the most reliable way to tell the vision model which hand is the
+    player's at a table with several seats.
     """
     out = img.convert("RGB").copy()
     w, h = out.size
-    x, y = seat[0] * w, seat[1] * h
-    # Big enough to go around a seat's cards rather than across their corner indices.
-    r = max(24, int(min(w, h) * 0.12))
-    line = max(2, r // 18)
+    x0, y0 = seat[0] * w, seat[1] * h
+    x1, y1 = x0 + seat[2] * w, y0 + seat[3] * h
+    line = max(2, round(min(w, h) / 220))
     d = ImageDraw.Draw(out)
-    d.ellipse((x - r - 1, y - r - 1, x + r + 1, y + r + 1), outline=(0, 0, 0), width=line + 2)
-    d.ellipse((x - r, y - r, x + r, y + r), outline=SEAT_MARKER_COLOR, width=line)
-    size = max(12, r // 3)
+    # Drawn just outside the box the player chose, so it never covers the cards inside it.
+    pad = line + 1
+    d.rectangle((x0 - pad - 1, y0 - pad - 1, x1 + pad + 1, y1 + pad + 1), outline=(0, 0, 0), width=line + 2)
+    d.rectangle((x0 - pad, y0 - pad, x1 + pad, y1 + pad), outline=SEAT_MARKER_COLOR, width=line)
+    size = max(12, round(min(w, h) / 30))
     try:
         from PIL import ImageFont
         font = ImageFont.load_default(size=size)
     except TypeError:  # Pillow < 10.1 has no sized default font
         font = None
-    label_y = y - r - line - size // 2 - 4
-    if label_y < size:  # no room above the ring: put the label below it
-        label_y = y + r + line + size // 2 + 4
-    d.text((x, label_y), "YOU", fill=SEAT_MARKER_COLOR, font=font, anchor="mm",
+    label_y = y0 - pad - size // 2 - 6
+    if label_y < size:  # no room above the box: put the label below it
+        label_y = y1 + pad + size // 2 + 6
+    d.text(((x0 + x1) / 2, label_y), "YOU", fill=SEAT_MARKER_COLOR, font=font, anchor="mm",
            stroke_width=max(2, size // 6), stroke_fill=(0, 0, 0))
     return out
 
 
-def to_png(img: Image.Image) -> bytes:
-    img = img.copy()
+def to_jpeg(img: Image.Image) -> bytes:
+    """Scaled-down JPEG for the API.
+
+    JPEG at this quality keeps card indices sharp while being ~10x smaller than PNG
+    for a video frame, which matters: the upload is part of every read's latency.
+    """
+    img = img.convert("RGB")
     img.thumbnail((MAX_SIDE, MAX_SIDE))
     buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
+    img.save(buf, format="JPEG", quality=88)
     return buf.getvalue()
 
 

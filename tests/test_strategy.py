@@ -110,3 +110,11 @@ def test_table_flags_override_inference():
 
 def test_bust():
     assert recommend(["10", "9", "5"], "6").action == S
+
+
+def test_cards_with_suit_symbols():
+    from blackjack_assistant.counting import hilo_sum
+    assert recommend(["9♥", "5♠"], "10♣").action == H
+    assert recommend(["A♦", "7♣"], "9♠").action == H
+    assert hand_total(["A♥", "K♠"]) == (21, True)
+    assert hilo_sum(["10♣", "5♦", "A♥", "8♠"]) == -1

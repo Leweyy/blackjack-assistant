@@ -54,7 +54,14 @@ def test_capture_mode_migration_and_validation(monkeypatch):
 
 
 def test_seat_validation():
-    assert config.from_dict({"seat": [0.25, 0.8]}).seat == [0.25, 0.8]
-    assert config.from_dict({"seat": [0, 1]}).seat == [0, 1]
-    for bad in ([1.5, 0.2], [0.1], "x", [True, 0.5], [0.2, None]):
+    assert config.from_dict({"seat": [0.25, 0.6, 0.1, 0.2]}).seat == [0.25, 0.6, 0.1, 0.2]
+    for bad in ([0.1], "x", [True, 0.5, 0.1, 0.1], [0.2, None, 0.1, 0.1]):
         assert config.from_dict({"seat": bad}).seat is None
+
+
+def test_seat_box_cleaning():
+    assert config.clean_seat([0.2, 0.5, 0.1, 0.2]) == [0.2, 0.5, 0.1, 0.2]
+    assert config.clean_seat([0.5, 0.6]) == [0.44, 0.52, 0.12, 0.16]  # 0.4.0 point seats
+    assert config.clean_seat([0.95, 0.9, 0.2, 0.3]) == [0.95, 0.9, 0.05, 0.1]  # clipped to the image
+    assert config.clean_seat([0.5, 0.5, 0.001, 0.2]) is None
+    assert config.clean_seat([1, 2, 3]) is None

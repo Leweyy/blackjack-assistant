@@ -13,7 +13,8 @@ SYSTEM_PROMPT = """You read screenshots of blackjack games (online casino, app, 
 video of a live table) and report exactly what cards are visible.
 
 Rules:
-- Report card ranks only: A, 2-10, J, Q, K. Ignore suits.
+- Write each card as its rank (A, 2-10, J, Q, K) followed by its suit symbol \
+(♠ ♥ ♦ ♣), e.g. "10♣", "A♥", "7♠". If a card's suit can't be made out, write the rank alone.
 - The dealer normally shows one face-up card (the upcard) and one face-down card. \
 Report only the face-up card(s).
 - player_hands is ONLY the hand(s) of "the player": the person whose screen this is. \
@@ -47,21 +48,22 @@ or even money.
 - Never guess a card you cannot read; set confident to false instead."""
 
 SEAT_MARKER_NOTE = """The player's seat has been marked on this screenshot with a bright \
-magenta ring labelled "YOU". That is the player's seat for certain: player_hands must \
-contain only the cards at or right next to that ring (including split hands there). \
-Every other seat's cards go in other_players_cards. The ring itself is not part of the game."""
+magenta box labelled "YOU". That is the player's seat for certain: player_hands must \
+contain only the cards inside that box (including split hands there). Cards outside the \
+box belong to other seats, even if they are close to it: put them in other_players_cards. \
+The box itself is not part of the game."""
 
 
 class TableState(BaseModel):
     table_visible: bool = Field(description="Whether a blackjack table is on screen")
-    dealer_cards: list[str] = Field(description="Dealer's face-up card ranks, e.g. ['K']")
-    player_hands: list[list[str]] = Field(description="Each player hand as a list of ranks")
+    dealer_cards: list[str] = Field(description="Dealer's face-up cards, e.g. ['K♠']")
+    player_hands: list[list[str]] = Field(description="Each of the player's hands as a list of cards, e.g. [['9♥', '5♠']]")
     active_hand_index: int = Field(description="Index into player_hands of the hand being played; 0 if not split")
     is_player_turn: bool = Field(description="True if the game is waiting for the player's decision")
     available_actions: list[str] = Field(
         description="Enabled action buttons, lowercase: hit, stand, double, split, surrender"
     )
-    other_players_cards: list[str] = Field(description="Face-up card ranks of every other seat at the table")
+    other_players_cards: list[str] = Field(description="Face-up cards of every other seat at the table")
     is_betting_phase: bool = Field(description="True while bets are being placed and no cards are dealt")
     round_complete: bool = Field(description="True when the dealer has finished and results are shown")
     shuffle_detected: bool = Field(description="True if the shoe is being shuffled or replaced")
@@ -73,25 +75,41 @@ class VisionError(RuntimeError):
     pass
 
 
+def model_options(model: str) -> dict:
+    """Request options tuned for speed on each model family.
+
+    Reading cards is a perception task, so extended thinking only adds latency:
+    turn it off where the model allows it (Opus 5.5 can't disable thinking, so it
+    runs at low effort instead). Server-side refusal fallbacks are supported on
+    Opus and Sonnet but not on Haiku, where the parameter must be left out.
+    """
+    opts: dict = {"output_config": {"effort": "low"}}
+    if model.startswith("claude-sonnet-5-5"):
+        opts["thinking"] = {"type": "between_tools"}  # Sonnet 5.5's "thinking off"
+    elif model.startswith("claude-haiku"):
+        opts["thinking"] = {"type": "disabled"}
+    if not model.startswith("claude-haiku"):
+        opts["betas"] = ["server-side-fallback-2026-07-01"]
+        opts["fallbacks"] = "default"
+    return opts
+
+
 class TableReader:
     def __init__(self, model: str = DEFAULT_MODEL, client: anthropic.Anthropic | None = None):
         self.model = model
         self.client = client or anthropic.Anthropic()
 
-    def read(self, png_bytes: bytes, seat_marked: bool = False) -> TableState:
-        image_b64 = base64.standard_b64encode(png_bytes).decode("ascii")
+    def read(self, jpeg_bytes: bytes, seat_marked: bool = False) -> TableState:
+        image_b64 = base64.standard_b64encode(jpeg_bytes).decode("ascii")
         response = self.client.beta.messages.parse(
             model=self.model,
             max_tokens=4000,
             system=SYSTEM_PROMPT,
-            # Reading cards is a simple perception task: low effort keeps it fast.
-            output_config={"effort": "low"},
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
+            **model_options(self.model),
             messages=[{
                 "role": "user",
                 "content": [
-                    {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": image_b64}},
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_b64}},
                     {"type": "text", "text": (SEAT_MARKER_NOTE + "\n\n" if seat_marked else "")
                      + "Read the current blackjack table state."},
                 ],

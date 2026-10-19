@@ -80,7 +80,7 @@ class Server:
         if handler is None:
             self.send({"id": req_id, "error": f"Unknown method: {method}"})
             return
-        slow = method in ("test_screenshot", "capture_preview")
+        slow = method in ("test_screenshot", "capture_bounds")
 
         def run():
             try:
@@ -151,7 +151,8 @@ class Server:
 
         session = Session(api_key=s.effective_api_key(), model=s.model, rules=s.rules(), bets=s.bets(),
                           interval=s.interval, make_grabber=s.grabber,
-                          counting=s.counting, decks=s.decks, emit=emit, seat=s.seat, on_exit=on_exit)
+                          counting=s.counting, decks=s.decks, emit=emit, seat=s.seat,
+                          max_in_flight=2 if s.fast_reads else 1, on_exit=on_exit)
         self._session = session
         session.start()
         return True
@@ -166,22 +167,35 @@ class Server:
             self._session.reset_count()
         return True
 
-    def rpc_capture_preview(self) -> dict:
-        """A snapshot of what's being watched, for marking the player's seat."""
+    def rpc_capture_bounds(self) -> list[int]:
+        """Where the watched area currently is on screen: [left, top, width, height] in capture pixels."""
         from .capture import CaptureError
 
         s = config.load(self._config_path)
         try:
-            img = s.grabber().grab()  # created and used on this request's thread, as mss requires
+            b = s.grabber().bounds()  # created and used on this request's thread, as mss requires
         except CaptureError as e:
             raise RequestError(str(e)) from e
-        img.thumbnail((1280, 1280))
-        return {"image": png_data_url(img), "width": img.width, "height": img.height}
+        return [b.left, b.top, b.width, b.height]
+
+    def rpc_set_seat(self, seat: list[float] | None) -> list[float] | None:
+        """Save the player's seat box, and apply it straight away if the assistant is running."""
+        s = config.load(self._config_path)
+        s.seat = config.clean_seat(seat) if seat is not None else None
+        if seat is not None and s.seat is None:
+            raise RequestError("That box is too small. Drag a box around your cards.")
+        try:
+            config.save(s, self._config_path)
+        except OSError as e:
+            raise RequestError(f"Couldn't save settings: {e}") from e
+        if self._session:
+            self._session.seat = s.seat
+        return s.seat
 
     def rpc_test_screenshot(self, path: str) -> dict:
         from PIL import Image, UnidentifiedImageError
 
-        from .capture import mark_seat, to_png
+        from .capture import mark_seat, to_jpeg
 
         s = config.load(self._config_path)
         if not s.effective_api_key():
@@ -195,7 +209,7 @@ class Server:
             img = mark_seat(img, s.seat)
         try:
             reader = TableReader(model=s.model, client=anthropic.Anthropic(api_key=s.effective_api_key()))
-            state = reader.read(to_png(img), seat_marked=bool(s.seat))
+            state = reader.read(to_jpeg(img), seat_marked=bool(s.seat))
         except anthropic.AuthenticationError as e:
             raise RequestError("The API key was rejected.") from e
         except (VisionError, anthropic.APIError) as e:
@@ -222,9 +236,9 @@ def enable_dpi_awareness() -> None:
 
 def self_test() -> int:
     """Used by CI on the packaged backend: exercise imports and screen capture."""
-    from .capture import ScreenGrabber, to_png
+    from .capture import ScreenGrabber, to_jpeg
     enable_dpi_awareness()
-    assert to_png(ScreenGrabber().grab())
+    assert to_jpeg(ScreenGrabber().grab())
     if sys.platform == "win32":
         # Exercise the window-capture calls (ctypes signatures only show up on real Windows).
         from .windows import Win32Windows

@@ -129,7 +129,7 @@ cd desktop && npm run dist     # output in desktop/release/
 
 ### CI and releases
 
-- **`build` workflow** runs on pushes to `main`, on pull requests, and on demand
+- **`build` workflow** runs on every branch push, on pull requests, and on demand
   (Actions → build → Run workflow). It runs the tests, builds the backend and the
   Windows installers, smoke-tests the packaged app, and uploads the `.exe` files as a
   run artifact.
@@ -144,7 +144,7 @@ To release a new version:
 # 1. bump "version" in desktop/package.json (e.g. 0.3.0), then
 git commit -am "Release v0.3.0"
 git tag v0.3.0
-git push origin main v0.3.0
+git push origin HEAD v0.3.0
 ```
 
 The workflow fails early if the tag doesn't match the version in `desktop/package.json`.

@@ -1,7 +1,7 @@
 {
   "name": "blackjack-assistant",
   "productName": "Blackjack Assistant",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "description": "Watches your blackjack game and recommends your next move",
   "author": "Blackjack Assistant",

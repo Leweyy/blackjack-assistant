@@ -3,6 +3,9 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # Manual runs (Actions → release → Run workflow) release the version in
+  # desktop/package.json, creating the v<version> tag on the chosen commit.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -20,6 +23,9 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+
     defaults:
       run:
         shell: bash
@@ -29,13 +35,15 @@ jobs:
 
       # The tag is the release name and electron-builder names the files from
       # desktop/package.json, so the two must agree.
-      - name: Check the tag matches the app version
+      - name: Work out the release tag
+        id: tag
         run: |
           version="v$(node -p "require('./desktop/package.json').version")"
-          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$version" != "$GITHUB_REF_NAME" ]; then
             echo "::error::Tag $GITHUB_REF_NAME doesn't match desktop/package.json version ($version). Bump the version, commit, then tag."
             exit 1
           fi
+          echo "tag=$version" >> "$GITHUB_OUTPUT"
 
       # ---- Python backend ----
       - uses: actions/setup-python@v5
@@ -115,6 +123,7 @@ jobs:
       - name: Create or refresh the release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
         run: |
           # NUL-delimited, because installer filenames can contain spaces.
           files=()
@@ -128,14 +137,16 @@ jobs:
 
           # Idempotent: refresh assets on retag, create on first push. Matches
           # desktop/scripts/release.mjs so local and CI paths behave the same.
-          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $GITHUB_REF_NAME already exists — refreshing assets."
-            gh release upload "$GITHUB_REF_NAME" "${files[@]}" \
+          # --target only matters on manual runs, where the tag doesn't exist yet.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — refreshing assets."
+            gh release upload "$TAG" "${files[@]}" \
               --repo "$GITHUB_REPOSITORY" \
               --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "${files[@]}" \
+            gh release create "$TAG" "${files[@]}" \
               --repo "$GITHUB_REPOSITORY" \
-              --title "Blackjack Assistant $GITHUB_REF_NAME" \
+              --target "$GITHUB_SHA" \
+              --title "Blackjack Assistant $TAG" \
               --generate-notes
           fi

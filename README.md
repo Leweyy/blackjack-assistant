@@ -148,6 +148,8 @@ git push origin HEAD v0.3.0
 ```
 
 The workflow fails early if the tag doesn't match the version in `desktop/package.json`.
+You can also skip the tag: bump the version, push, then run **Actions → release → Run
+workflow**. It creates the `v<version>` tag on that commit for you.
 To publish from your own machine instead, build the backend, then run
 `npm run release` in `desktop/`. It does the same thing using the `gh` CLI.
 

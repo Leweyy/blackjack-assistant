@@ -452,10 +452,13 @@ const LOCAL_PRESETS = [
   { label: "LM Studio", url: "http://localhost:1234/v1" },
 ];
 
+const TYPE_OWN = "__type_own__";
+
 function LocalModelCard({ form, update }: PageProps) {
   const [models, setModels] = useState<string[] | null>(null);
   const [checking, setChecking] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [typing, setTyping] = useState(false);
 
   async function check() {
     setChecking(true);
@@ -463,6 +466,7 @@ function LocalModelCard({ form, update }: PageProps) {
     try {
       const found = await window.api.request<string[]>("local_models", { url: form.local_url, api_key: form.local_api_key });
       setModels(found);
+      setTyping(false);
       setMessage(found.length
         ? { ok: true, text: `Connected: ${found.length} model${found.length === 1 ? "" : "s"} available.` }
         : { ok: false, text: "Connected, but the server has no models. Pull one first, e.g. ollama pull qwen2.5vl:7b" });
@@ -500,9 +504,20 @@ function LocalModelCard({ form, update }: PageProps) {
         {message && <div className={message.ok ? "ok-text" : "error-text"}>{message.text}</div>}
       </div>
       <Row title="Model" hint="A vision model, e.g. qwen2.5vl:7b or gemma3:12b on Ollama, or the Hugging Face name on vLLM.">
-        <input className="input" style={{ width: 230 }} list="local-models" spellCheck={false} value={form.local_model}
-          placeholder="qwen2.5vl:7b" onChange={(e) => update("local_model", e.target.value)} aria-label="Local model" />
-        <datalist id="local-models">{(models ?? []).map((m) => <option key={m} value={m} />)}</datalist>
+        {models && models.length > 0 && !typing ? (
+          // A real dropdown: a <datalist> only suggests entries matching what's already typed,
+          // so once a model was filled in it hid all the others.
+          <select className="input" style={{ width: 230 }} value={form.local_model} aria-label="Local model"
+            onChange={(e) => (e.target.value === TYPE_OWN ? setTyping(true) : update("local_model", e.target.value))}>
+            {!models.includes(form.local_model) && form.local_model && <option value={form.local_model}>{form.local_model}</option>}
+            {models.map((m) => <option key={m} value={m}>{m}</option>)}
+            <option value={TYPE_OWN}>Type a name…</option>
+          </select>
+        ) : (
+          <input className="input" style={{ width: 230 }} spellCheck={false} value={form.local_model}
+            placeholder="qwen2.5vl:7b" onChange={(e) => update("local_model", e.target.value)} aria-label="Local model" />
+        )}
+        {models && models.length > 0 && typing && <button className="btn" onClick={() => setTyping(false)}>List</button>}
       </Row>
       <Row title="API key" hint="Only if your server needs one (e.g. vLLM started with --api-key). Leave empty for Ollama.">
         <input className="input" style={{ width: 230 }} type="password" spellCheck={false} value={form.local_api_key}

@@ -291,3 +291,5 @@ body.overlay-body #root { height: auto; padding: 8px; }
 .ok-text { color: var(--accent); font-size: 12.5px; }
 .error-text { color: #ff8f88; font-size: 12.5px; }
 .key-row .btn { white-space: nowrap; }
+select.input { appearance: auto; cursor: pointer; }
+select.input option { background: var(--panel); color: var(--text); }

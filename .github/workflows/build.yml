@@ -1,0 +1,64 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---- Python backend ----
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -e ".[dev]" pyinstaller
+
+      - name: Python tests
+        run: pytest -q
+
+      - name: Build the backend
+        run: pyinstaller --noconfirm --onefile --console --name blackjack-backend --distpath desktop/backend-dist run_backend.py
+
+      - name: Backend self-test
+        run: desktop\backend-dist\blackjack-backend.exe --self-test
+
+      # ---- Electron front end ----
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - run: npm ci
+        working-directory: desktop
+
+      - run: npm run typecheck
+        working-directory: desktop
+
+      - name: Build the app
+        working-directory: desktop
+        run: npm run dist
+
+      # Starts the packaged app, which launches the bundled backend and pings it.
+      - name: Smoke test the packaged app
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $exe = Get-ChildItem "desktop/release/win-unpacked" -Filter "Blackjack*.exe" | Select-Object -First 1
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList "--smoke-test" -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); Write-Error "app did not exit"; exit 1 }
+          if ($p.ExitCode -ne 0) { Write-Error "smoke test failed with exit code $($p.ExitCode)"; exit 1 }
+
+      # Handy for trying a branch before tagging a release.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blackjack-assistant-windows
+          path: desktop/release/*.exe
+          if-no-files-found: error

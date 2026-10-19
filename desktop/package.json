@@ -5,6 +5,10 @@
   "private": true,
   "description": "Watches your blackjack game and recommends your next move",
   "author": "Blackjack Assistant",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Leweyy/blackjack-assistant.git"
+  },
   "main": "dist/main/main.js",
   "scripts": {
     "build:main": "tsc -p tsconfig.main.json",
@@ -12,7 +16,8 @@
     "build": "npm run build:main && npm run build:renderer",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.json --noEmit",
     "start": "npm run build && electron .",
-    "dist:win": "npm run build && electron-builder --win --publish never"
+    "dist": "npm run build && electron-builder --publish never",
+    "release": "npm run dist && node scripts/release.mjs"
   },
   "build": {
     "appId": "com.blackjackassistant.app",
@@ -49,7 +54,14 @@
     "portable": {
       "artifactName": "BlackjackAssistant-${version}-portable.exe"
     },
-    "publish": null
+    "publish": null,
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility",
+      "artifactName": "BlackjackAssistant-${version}-linux-${arch}.${ext}"
+    }
   },
   "devDependencies": {
     "@types/node": "25.9.9",

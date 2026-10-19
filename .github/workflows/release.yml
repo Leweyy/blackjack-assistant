@@ -1,0 +1,141 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: windows
+          - os: ubuntu-latest
+            artifact: linux
+
+    runs-on: ${{ matrix.os }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The tag is the release name and electron-builder names the files from
+      # desktop/package.json, so the two must agree.
+      - name: Check the tag matches the app version
+        run: |
+          version="v$(node -p "require('./desktop/package.json').version")"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match desktop/package.json version ($version). Bump the version, commit, then tag."
+            exit 1
+          fi
+
+      # ---- Python backend ----
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -e ".[dev]" pyinstaller
+
+      - name: Python tests
+        run: pytest -q
+
+      - name: Build the backend
+        run: pyinstaller --noconfirm --onefile --console --name blackjack-backend --distpath desktop/backend-dist run_backend.py
+
+      # Screen capture needs a display; Linux runners don't have one.
+      - name: Backend self-test
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run --auto-servernum desktop/backend-dist/blackjack-backend --self-test
+          else
+            desktop/backend-dist/blackjack-backend.exe --self-test
+          fi
+
+      # ---- Electron front end ----
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - run: npm ci
+        working-directory: desktop
+
+      - run: npm run typecheck
+        working-directory: desktop
+
+      # Unsigned on purpose: there is no code-signing certificate, so Windows
+      # SmartScreen warns on first launch ("More info" → "Run anyway").
+      - name: Build the app
+        working-directory: desktop
+        run: npm run dist
+
+      - name: Smoke test the packaged app (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $exe = Get-ChildItem "desktop/release/win-unpacked" -Filter "Blackjack*.exe" | Select-Object -First 1
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList "--smoke-test" -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); Write-Error "app did not exit"; exit 1 }
+          if ($p.ExitCode -ne 0) { Write-Error "smoke test failed with exit code $($p.ExitCode)"; exit 1 }
+
+      # GitHub runners ship an unconfigured chrome-sandbox helper, which aborts
+      # the process. The smoke test needs no sandbox.
+      - name: Smoke test the packaged app (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 3
+        run: xvfb-run --auto-servernum desktop/release/linux-unpacked/blackjack-assistant --no-sandbox --smoke-test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blackjack-assistant-${{ matrix.artifact }}
+          path: |
+            desktop/release/*.exe
+            desktop/release/*.AppImage
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create or refresh the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # NUL-delimited, because installer filenames can contain spaces.
+          files=()
+          while IFS= read -r -d '' file; do files+=("$file"); done \
+            < <(find artifacts -type f -print0)
+
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No build artifacts were downloaded."
+            exit 1
+          fi
+
+          # Idempotent: refresh assets on retag, create on first push. Matches
+          # desktop/scripts/release.mjs so local and CI paths behave the same.
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists — refreshing assets."
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Blackjack Assistant $GITHUB_REF_NAME" \
+              --generate-notes
+          fi

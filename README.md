@@ -6,17 +6,18 @@ also **counts cards** (Hi-Lo) and tells you when to raise or lower your bet.
 
 ## Install (Windows)
 
-1. Open the repository's **Actions** tab on GitHub, select the latest
-   **Build Windows app** run, and download the **BlackjackAssistant-windows**
-   artifact. If a release has been published (from a `v*` tag), you can download it
-   from **Releases** instead.
-2. Unzip it. It contains two files:
+1. Open the latest release from the repository's
+   [**Releases**](https://github.com/Leweyy/blackjack-assistant/releases) page and
+   download one of these:
    - `BlackjackAssistant-<version>-setup.exe`: an installer that adds Start-menu and
      desktop shortcuts.
    - `BlackjackAssistant-<version>-portable.exe`: a single file you can run without
      installing.
-3. The app isn't code-signed, so Windows SmartScreen may warn you the first time. Click
+   - `BlackjackAssistant-<version>-linux-x86_64.AppImage`: for Linux.
+2. The app isn't code-signed, so Windows SmartScreen may warn you the first time. Click
    **More info → Run anyway**.
+
+There's no auto-update yet. To update, download the new version from Releases.
 
 ## Using it
 
@@ -118,15 +119,37 @@ npm install
 npm start
 ```
 
-Set `BJ_PYTHON` to choose the Python interpreter used in development. Build the Windows
-installers locally with `npm run dist:win` after building the backend:
+Set `BJ_PYTHON` to choose the Python interpreter used in development. To build the
+installers for your platform locally, build the backend first, then run `npm run dist`:
 
 ```bash
 pyinstaller --onefile --console --name blackjack-backend --distpath desktop/backend-dist run_backend.py
+cd desktop && npm run dist     # output in desktop/release/
 ```
 
-The **Build Windows app** GitHub workflow does all of this on every push. It runs the
-tests, builds the backend and the installers, and smoke-tests the packaged app.
+### CI and releases
+
+- **`build` workflow** runs on pushes to `main`, on pull requests, and on demand
+  (Actions → build → Run workflow). It runs the tests, builds the backend and the
+  Windows installers, smoke-tests the packaged app, and uploads the `.exe` files as a
+  run artifact.
+- **`release` workflow** runs when you push a `v*` tag. It builds and smoke-tests on
+  Windows and Linux, then creates the GitHub release with generated notes and attaches
+  the installers. If the tag already has a release, it replaces the files instead, so
+  re-running a failed release is safe.
+
+To release a new version:
+
+```bash
+# 1. bump "version" in desktop/package.json (e.g. 0.3.0), then
+git commit -am "Release v0.3.0"
+git tag v0.3.0
+git push origin main v0.3.0
+```
+
+The workflow fails early if the tag doesn't match the version in `desktop/package.json`.
+To publish from your own machine instead, build the backend, then run
+`npm run release` in `desktop/`. It does the same thing using the `gh` CLI.
 
 There's also a command-line version that prints advice in a terminal:
 `python -m blackjack_assistant --region 200,150,1100,700` (see `--help`).
